@@ -1,0 +1,32 @@
+packages:
+  - "packages/*"
+  - "mcp/*"
+  - "desktop"
+
+# Build-script policy for transitive dependencies. The two declined builds are
+# codegen we do not need (Google GenAI SDK, protobufjs), and declining them keeps
+# `pnpm install` from failing the ignored-builds check. The three allowed builds
+# are native modules dsh needs: node-pty for its pty layer and koffi for FFI
+# bindings, both pulled in by the local subprocess provider.
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  esbuild: true
+  koffi: true
+  node-pty: true
+  protobufjs: false
+
+# pi's AWS Bedrock provider chain asks for @aws-sdk/token-providers@3.1129.0,
+# which is not published on npm, so no fresh install can resolve it. Pin the
+# dependency to the newest published version instead. Drop this override once
+# pi's chain resolves on its own.
+overrides:
+  '@aws-sdk/token-providers': 3.1127.0
+
+minimumReleaseAgeExclude:
+  - '@earendil-works/chord@0.85.1'
+  - '@earendil-works/pi-agent-core@0.85.1'
+  - '@earendil-works/pi-ai@0.85.1'
+  - '@earendil-works/pi-coding-agent@0.85.1'
+  - '@earendil-works/pi-telemetry@0.85.1'
+  - '@earendil-works/pi-tui@0.85.1'

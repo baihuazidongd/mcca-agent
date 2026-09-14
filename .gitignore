@@ -1,0 +1,24 @@
+# ── Dependencies & build output ─────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# ── Generated configuration ─────────────────────────────────────
+# These name the checkout by absolute path, so they are materialised from the
+# committed templates by `pnpm run setup` instead of being committed.
+#   config/*.example.json      -> config/mcp.json, config/hot-plugins.json
+#   dsh/profiles/web/*         -> config/dsh-home/profiles/web/*
+#   config/mcp.json            -> config/dsh-mcp.patch.yml
+config/mcp.json
+config/hot-plugins.json
+config/dsh-mcp.patch.yml
+config/dsh-home/
+
+# ── Local runtime state ─────────────────────────────────────────
+config/.pi-web/
+
+# ── Tauri ───────────────────────────────────────────────────────
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="autocomplete" content="off" />
+  <title>PI 编程助手</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ── 左栏：对话历史 + 底部菜单 ─────────────────────── -->
+    <aside id="sidebar" class="wood-panel">
+      <div class="side-head">
+        <span class="t">对话历史</span>
+        <button id="btn-new" class="btn primary" title="新建会话">＋</button>
+      </div>
+      <div class="ws-row">
+        <div id="workspace-picker" class="dd-host"></div>
+      </div>
+      <ul id="session-list" aria-label="会话列表"></ul>
+      <div class="side-menu">
+        <button id="btn-settings-menu" class="menu-btn">⚙ 设置</button>
+        <div id="settings-menu" class="settings-menu" hidden>
+          <div class="sm-item" data-action="providers">服务商设置</div>
+          <div class="sm-item" data-action="agents">子代理管理</div>
+          <div class="sm-item" data-action="presets">预设设置</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── 左坞：对话定位书签轮盘 ─────────────────────────────── -->
+    <div id="left-dock">
+      <nav id="bookmark-bar" aria-label="对话定位" hidden></nav>
+    </div>
+
+    <!-- ── 中栏：聊天面板（标签页头 + 羊皮纸 + 输入 + 状态条） ── -->
+    <main id="main">
+      <section id="chat-panel" class="wood-panel">
+        <div class="panel-tabbar">
+          <div class="panel-tab active" id="panel-tab">
+            <span id="session-title">选择或新建会话</span>
+            <button id="btn-rename" class="tab-rename" title="重命名" hidden>✎</button>
+          </div>
+          <div class="turn-stats">
+            <span id="avg-speed" class="avg-speed" hidden></span>
+            <span id="task-timer" class="task-timer" hidden></span>
+          </div>
+          <div class="tab-right">
+            <div id="ctx-meter" class="ctx-meter" hidden>
+              <span class="ctx-bar"><i></i></span>
+              <span class="ctx-cap"><span class="ctx-cap-text">上下文</span><b class="ctx-pct">—</b></span>
+              <span id="ctx-compact" class="ctx-compact" hidden>压缩</span>
+              <div class="ctx-pop"></div>
+            </div>
+          </div>
+        </div>
+        <div id="transcript-wrap">
+          <div id="transcript" aria-live="polite"></div>
+          <button id="btn-jump-bottom" title="回到最新消息" hidden>▼ 置底</button>
+        </div>
+        <div id="composer">
+          <div id="attach-row" hidden></div>
+          <textarea id="input" rows="1" placeholder="输入你的问题或代码…（Enter 发送，Shift+Enter 换行，可粘贴/拖入图片和文件）" disabled autocomplete="off" spellcheck="false"></textarea>
+          <button id="btn-send" class="btn send" disabled>发送 ▸</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── 右栏：运行信息 ───────────────────────────────────── -->
+    <aside id="rightbar">
+      <div class="rpanel wood-panel">
+        <div class="rp-head">
+          <span class="t">当前对话 DIFF</span>
+          <button id="btn-diff-all" class="btn small" title="查看全部改动文件">全部</button>
+        </div>
+        <div class="rp-body">
+          <ul id="diff-list" class="diff-list"></ul>
+          <div id="diff-empty" class="rp-note">本会话还没有文件改动</div>
+        </div>
+      </div>
+      <!-- ── 子代理坞：角色头像 + 名称，随 DIFF 之下 ── -->
+      <div id="agent-dock" class="rpanel wood-panel" hidden></div>
+      <!-- ── 模型面板：左类别名 + 右当前值 ── -->
+      <div class="rpanel wood-panel" id="model-rpanel">
+        <div class="rp-head"><span class="t">模型</span></div>
+        <div class="rp-body model-rp">
+          <div id="compact-model-picker" class="dd-host compact-model"></div>
+          <div id="model-picker" class="dd-host"></div>
+          <div id="thinking-picker" class="dd-host"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <dialog id="agents-dlg">
+    <div class="dlg-head">
+      <h2>子代理管理</h2>
+      <button id="agents-close" class="btn ghost">✕</button>
+    </div>
+    <div class="dlg-body two-pane">
+      <div id="agents-list" class="pane-list"></div>
+      <div class="pane-form grid single">
+        <label>名称<input id="agent-name" autocomplete="off" spellcheck="false" /></label>
+        <label>描述<input id="agent-desc" autocomplete="off" spellcheck="false" /></label>
+        <label>模型
+          <select id="agent-model">
+            <option value="">继承</option>
+          </select>
+        </label>
+        <label>备用模型（逗号分隔）<input id="agent-fallbacks" autocomplete="off" spellcheck="false" /></label>
+        <label>思考级别
+          <select id="agent-thinking">
+            <option value="">继承</option>
+            <option value="off">关闭</option>
+            <option value="minimal">极简</option>
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+            <option value="xhigh">超高</option>
+            <option value="max">最大</option>
+          </select>
+        </label>
+        <label>作用域
+          <select id="agent-scope">
+            <option value="user">用户</option>
+            <option value="project">项目</option>
+          </select>
+        </label>
+        <label>角色提示词<textarea id="agent-prompt" rows="8"></textarea></label>
+        <label>工具（逗号分隔）<input id="agent-tools" autocomplete="off" spellcheck="false" /></label>
+        <p id="agent-msg" class="pf-msg"></p>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span class="row">
+        <button id="agent-new" class="btn">＋ 新建</button>
+        <button id="agent-enable" class="btn">启用</button>
+        <button id="agent-disable" class="btn danger">关闭</button>
+      </span>
+      <button id="agent-save" class="btn primary">保存</button>
+    </div>
+  </dialog>
+  <dialog id="agent-run-dlg">
+    <div class="dlg-head">
+      <h2 id="agent-run-title">子代理对话</h2>
+      <button id="agent-run-close" class="btn ghost">✕</button>
+    </div>
+    <div class="dlg-body" id="agent-run-body"></div>
+    <div class="dlg-foot">
+      <span></span>
+      <button id="agent-run-stop" class="btn danger">停止任务</button>
+    </div>
+  </dialog>
+  <dialog id="settings-dlg">
+    <div class="dlg-head">
+      <h2>服务商设置</h2>
+      <button id="btn-settings-close" class="btn ghost">✕ 关闭</button>
+    </div>
+    <div class="dlg-body two-pane">
+      <div id="provider-list" class="pane-list"></div>
+      <div class="provider-form pane-form" id="provider-form">
+        <h3 id="pf-title">添加服务商</h3>
+        <div class="grid">
+          <label>ID（路由标识）<input id="pf-id" placeholder="my-gateway" autocomplete="off" spellcheck="false" /></label>
+          <label>API 协议
+            <div id="pf-api" class="dd-host"></div>
+          </label>
+          <label class="wide">API 地址<input id="pf-baseurl" placeholder="https://gateway.example/v1" autocomplete="off" spellcheck="false" /></label>
+          <label class="wide">API 密钥<input id="pf-key" type="password" placeholder="留空保持已存密钥不变" autocomplete="new-password" /></label>
+          <label>重试次数<input id="pf-retry" inputmode="numeric" placeholder="默认 5" autocomplete="off" spellcheck="false" /></label>
+          <label>重试等待（秒）<input id="pf-wait" inputmode="decimal" placeholder="默认 15" autocomplete="off" spellcheck="false" /></label>
+          <p class="rp-note dim wide" style="margin:0">出错后按此设置自动重试；等待时间逐次翻倍（如 15s→30s→60s…）。留空使用默认：5 次、15s。</p>
+        </div>
+        <div class="models-head">
+          <span>模型目录</span>
+          <span class="row">
+            <button id="pf-fetch" class="btn">获取可用模型</button>
+            <button id="pf-add-model" class="btn">＋ 添加模型</button>
+          </span>
+        </div>
+        <div id="pf-models"></div>
+        <p id="pf-msg"></p>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button id="pf-new" class="btn">＋ 新建自定义服务商</button>
+      <span class="row">
+        <button id="pf-delete" class="btn danger">删除该服务商</button>
+        <button id="pf-save" class="btn primary">保存服务商</button>
+      </span>
+    </div>
+  </dialog>
+
+  <dialog id="fetch-dlg">
+    <div class="dlg-head"><h2>选择要添加的模型</h2><button id="fetch-close" class="btn ghost">✕</button></div>
+    <div class="dlg-body">
+      <ul id="fetch-list"></ul>
+    </div>
+    <div class="dlg-foot">
+      <span class="row">
+        <button id="fetch-toggle-all" class="btn">全选</button>
+        <span id="fetch-hint" class="muted"></span>
+      </span>
+      <span class="row">
+        <button id="fetch-cancel" class="btn ghost">取消</button>
+        <button id="fetch-adopt" class="btn primary">添加所选</button>
+      </span>
+    </div>
+  </dialog>
+
+  <dialog id="diff-dlg">
+    <div class="dlg-head">
+      <h2 id="diff-title">文件改动</h2>
+      <span class="row">
+        <button id="diff-back" class="btn small" hidden>← 返回</button>
+        <button id="diff-close" class="btn ghost">✕ 关闭</button>
+      </span>
+    </div>
+    <div class="dlg-body">
+      <pre id="diff-body" class="diff-body-pre"></pre>
+    </div>
+  </dialog>
+
+  <dialog id="html-dlg">
+    <div class="dlg-head">
+      <h2 id="html-title">HTML 预览</h2>
+      <span class="row">
+        <button id="html-open" class="btn small" title="在新窗口打开">↗ 新窗口</button>
+        <button id="html-close" class="btn ghost">✕ 关闭</button>
+      </span>
+    </div>
+    <div class="dlg-body html-body">
+      <iframe id="html-frame" sandbox="allow-scripts allow-modals allow-forms"></iframe>
+    </div>
+  </dialog>
+
+  <dialog id="presets-dlg">
+    <div class="dlg-head"><h2>预设设置</h2><button id="presets-close" class="btn ghost">✕</button></div>
+    <div class="dlg-body">
+      <div class="models-head">
+        <span>规则组（启用后每回合注入系统提示词）</span>
+        <button id="btn-add-preset" class="btn">＋ 新建预设</button>
+      </div>
+      <ul id="preset-list" class="preset-list"></ul>
+      <div class="models-head"><span>上下文文件（每回合注入）</span></div>
+      <div id="ctx-files"></div>
+      <label class="switch-line"><input type="checkbox" id="no-compaction" /> 上下文不压缩</label>
+      <div class="rp-note dim">开启后新会话关闭自动压缩</div>
+    </div>
+  </dialog>
+
+  <dialog id="preset-dlg">
+    <div class="dlg-head"><h2 id="pd-title">预设</h2><button id="pd-close" class="btn ghost">✕</button></div>
+    <div class="dlg-body">
+      <div class="grid single">
+        <label>预设名称<input id="pd-name" placeholder="例如：生图走画布" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div class="models-head">
+        <span>规则（每条注入系统提示词）</span>
+        <button id="pd-add-rule" class="btn">＋ 添加规则</button>
+      </div>
+      <div id="pd-rules"></div>
+    </div>
+    <div class="dlg-foot">
+      <span></span>
+      <button id="pd-save" class="btn primary">保存预设</button>
+    </div>
+  </dialog>
+
+  <dialog id="ask-dlg">
+    <div class="dlg-head"><h2 id="ask-title"></h2></div>
+    <div class="dlg-body">
+      <p id="ask-msg"></p>
+      <input id="ask-input" hidden autocomplete="off" spellcheck="false" readonly />
+    </div>
+    <div class="dlg-foot">
+      <button id="ask-cancel" class="btn ghost">取消</button>
+      <button id="ask-ok" class="btn primary">确定</button>
+    </div>
+  </dialog>
+
+  <div id="boot-overlay" class="boot-overlay">
+    <div class="boot-box">
+      <div class="boot-title">PI 编程助手</div>
+      <div id="boot-text" class="boot-text">加载中…</div>
+    </div>
+  </div>
+
+  <div id="toast" hidden></div>
+  <dialog id="files-dlg">
+    <div class="dlg-head">
+      <h2 id="files-title">文件</h2>
+      <button id="files-close" class="btn ghost">✕ 关闭</button>
+    </div>
+    <div class="dlg-body">
+      <div id="files-crumbs" class="files-crumbs"></div>
+      <ul id="files-list" class="files-list"></ul>
+    </div>
+  </dialog>
+  <script src="/vendor/marked.umd.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

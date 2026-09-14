@@ -1,0 +1,38 @@
+# dsh 'web' profile overlay for pi-dsh-bridge.
+#
+# This file is materialised by `pnpm run setup` (see scripts/bootstrap.mjs) into
+# the dsh home as profiles/web/cordis.patch.yml, with the checkout-root
+# placeholder token replaced by this machine's absolute path. It lives in the
+# profile's *watched* layer rather than in a --patch overlay: the bridge's own
+# plugin set is then re-resolved whenever
+# this file changes, and config/hot-plugins.json decides the actual host plugin
+# list at runtime (supervisor: packages/hot-mount). Adding or removing a bridge
+# plugin therefore needs no dsh restart.
+
+# hot-mount is the bridge's plugin supervisor: it reads the manifest and applies
+# the bridge's host plugins to the running loader tree.
+- insert:
+    - id: pdb-hot-mount
+      name: file:///{{ROOT}}/packages/hot-mount/src/index.js
+      config:
+        manifest: {{ROOT}}/config/hot-plugins.json
+
+# Expose the shared skills/ directory to dsh. The web profile disables the base
+# skill-filesystem row, so re-enable it explicitly; a distinct providerName and
+# includeDefaultRoots:false keep it from colliding with the preset provider or
+# scanning anything outside this repository.
+- id: skill-filesystem
+  disabled: false
+  config:
+    providerName: pdb-filesystem
+    includeDefaultRoots: false
+    customSkillDirs:
+      - {{ROOT}}/skills
+
+# Trim the boot graph to what the bridge uses.
+- id: ui-imagegen-settings
+  disabled: true
+- id: ui-trajectory
+  disabled: true
+- id: session-log-download
+  disabled: true

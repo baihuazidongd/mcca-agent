@@ -1,0 +1,8 @@
+{
+  "name": "hello-tool",
+  "version": "1.0.0",
+  "kind": "tool",
+  "targets": ["ds", "pi"],
+  "description": "示例工具插件：根据名字返回一句中文问候（共享库最简样例）。",
+  "entry": "index.mjs"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@pi-dsh-bridge/dsh-adapter",
+  "version": "0.1.0",
+  "description": "dsh (Cordis) adapter for the neutral plugin contract: loads the shared plugin library and maps registerTool/registerCommand/on onto ctx.tools/ctx.commands/dsh events",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@pi-dsh-bridge/plugin-host": "workspace:^"
+  }
+}

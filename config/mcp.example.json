@@ -1,0 +1,9 @@
+[
+  {
+    "serverName": "everything",
+    "transport": "stdio",
+    "command": "node",
+    "args": ["{{ROOT}}/mcp/everything/server.mjs"],
+    "description": "Demo MCP server shipped with this repository. Exposes echo, add and now; dependency-free, so it starts with no install."
+  }
+]

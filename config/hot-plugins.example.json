@@ -1,0 +1,21 @@
+[
+  {
+    "id": "pdb-dsh-adapter",
+    "file": "{{ROOT}}/packages/dsh-adapter/src/index.js",
+    "config": {
+      "cwd": "{{ROOT}}"
+    }
+  },
+  {
+    "id": "pdb-session-delete",
+    "file": "{{ROOT}}/packages/session-delete/src/index.js"
+  },
+  {
+    "id": "pdb-client-flags",
+    "file": "{{ROOT}}/packages/client-flags/src/index.js"
+  },
+  {
+    "id": "pdb-task-notify",
+    "file": "{{ROOT}}/packages/task-notify/src/index.js"
+  }
+]

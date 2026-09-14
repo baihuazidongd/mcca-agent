@@ -1,0 +1,16 @@
+# Normalize text to LF on checkout so the tree is identical on every platform.
+* text=auto eol=lf
+
+# Windows-only launchers keep CRLF so cmd.exe and friends read them as expected.
+*.cmd text eol=crlf
+
+# Binary assets: never touched by the line-ending filters.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.gz binary

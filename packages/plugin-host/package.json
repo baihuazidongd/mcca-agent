@@ -1,0 +1,26 @@
+{
+  "name": "@pi-dsh-bridge/plugin-host",
+  "version": "0.1.0",
+  "description": "Shared plugin library loader: discovery, per-agent enable/disable, hot reload",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@pi-dsh-bridge/plugin-sdk": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

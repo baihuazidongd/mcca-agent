@@ -1,0 +1,15 @@
+{
+  "name": "@pi-dsh-bridge/pi-adapter",
+  "version": "0.1.0",
+  "description": "pi extension adapter: maps the neutral plugin contract onto pi's registerTool/registerCommand/on",
+  "main": "./src/index.cjs",
+  "exports": {
+    ".": "./src/index.cjs",
+    "./extension": "./src/extension.cjs"
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@pi-dsh-bridge/plugin-host": "workspace:^",
+    "@pi-dsh-bridge/plugin-sdk": "workspace:^"
+  }
+}

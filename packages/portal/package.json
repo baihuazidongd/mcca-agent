@@ -1,0 +1,14 @@
+{
+  "name": "@pi-dsh-bridge/portal",
+  "version": "0.1.0",
+  "description": "Desktop-app core: manages dsh and pi child processes and serves a three-tab (dsh / pi / manage) React frontend",
+  "main": "./server.cjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "@pi-dsh-bridge/plugin-host": "workspace:^",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

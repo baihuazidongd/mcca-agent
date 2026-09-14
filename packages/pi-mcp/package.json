@@ -1,0 +1,10 @@
+{
+  "name": "@pi-dsh-bridge/pi-mcp",
+  "version": "0.1.0",
+  "description": "MCP client for pi: exposes MCP server tools as mcp__<server>__<tool> pi tools (stdio + SSE/Streamable HTTP)",
+  "main": "./src/index.cjs",
+  "exports": {
+    ".": "./src/index.cjs"
+  },
+  "files": ["src"]
+}
