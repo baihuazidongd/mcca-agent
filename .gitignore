@@ -1,6 +1,9 @@
 # ── Dependencies & build output ─────────────────────────────────
 node_modules/
 dist/
+# The Tauri config declares desktop/dist as its frontendDist, so this one dist/
+# is a committed asset rather than build output.
+!desktop/dist/
 *.tsbuildinfo
 *.log
 .DS_Store
