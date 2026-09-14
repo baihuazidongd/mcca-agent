@@ -22,3 +22,6 @@ config/.pi-web/
 # ── Tauri ───────────────────────────────────────────────────────
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+# Release archives built by `pnpm run pack` (or by hand) are local artifacts.
+dist-release/
