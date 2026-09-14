@@ -72,8 +72,8 @@ const AGENTS = {
       ? process.env.DSH_ARGS.split(" ")
       : [
           path.join(ROOT, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"),
-          "web",
-          "--profile",
+          // `web` already selects the web profile, and launcher flags such as
+          // --patch must sit before the app's own flags (--port).
           "web",
           "--patch",
           dshMcpPatchArg(),
