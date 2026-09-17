@@ -58,7 +58,9 @@ export function generateMcpPatch(mcpConfigPath, outPath) {
     // `dsh: false` marks servers dsh already mounts through its own profile
     // patch (e.g. copied dsh-home rows); emitting them again would collide on
     // serverName. Those rows still reach the pi side via @pi-dsh-bridge/pi-mcp.
-    .filter((cfg) => cfg?.dsh !== false)
+    // `disabledDs` is the portal's per-agent toggle for dsh; skipping it here is
+    // what makes that toggle actually unmount the row.
+    .filter((cfg) => cfg?.dsh !== false && cfg?.disabledDs !== true)
     .map(mcpRow)
     .filter(Boolean);
   const body = rows.length

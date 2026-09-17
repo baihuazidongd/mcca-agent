@@ -402,6 +402,7 @@ function mcpCacheKey(config) {
     config.command,
     config.args,
     config.url,
+    config.headers,
     config.env,
   ]);
 }
@@ -519,6 +520,7 @@ module.exports = {
   createPiMcpExtension,
   readMcpServers,
   expandEnv,
+  mcpCacheKey,
   McpClient,
   StdioJsonRpc,
   HttpJsonRpc,

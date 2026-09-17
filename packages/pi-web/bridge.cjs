@@ -241,7 +241,12 @@ class PiWebBridge {
     const runtime = await this.runtime();
     const { createPiAdapter } = await import("@pi-dsh-bridge/pi-adapter");
     const { createPiMcpExtension, readMcpServers } = await import("@pi-dsh-bridge/pi-mcp");
-    const mcpServers = readMcpServers(path.join(ROOT, "config", "mcp.json"));
+    // `disabledPi` is written by the portal's per-agent MCP toggle. Honour it
+    // here, where the servers are actually mounted, otherwise the toggle only
+    // changes what the manage tab renders and the server still starts in pi.
+    const mcpServers = readMcpServers(path.join(ROOT, "config", "mcp.json")).filter(
+      (cfg) => cfg?.disabledPi !== true,
+    );
     const piAdapter = createPiAdapter({
       pluginsDir: path.join(ROOT, "plugins"),
       configPath: path.join(ROOT, "config", "plugins.json"),
