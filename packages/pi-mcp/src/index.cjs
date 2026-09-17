@@ -125,6 +125,11 @@ class StdioJsonRpc {
         // fix. Retry the full command line through cmd.exe once.
         if (!viaCmd && process.platform === "win32" && error.code === "ENOENT") {
           viaCmd = true;
+          // The whole line goes through one cmd.exe invocation. With /s, cmd
+          // strips the outer quote pair, so a token containing both spaces and
+          // shell metacharacters could be re-split here. Only bare command names
+          // that resolve to a .cmd shim reach this path - an absolute path is
+          // spawned directly above - so keep it that way if you add a server.
           const line = [this.command, ...this.args].map(windowsQuote).join(" ");
           const shelled = spawn("cmd.exe", ["/d", "/s", "/c", line], spawnOpts);
           this.child = shelled;

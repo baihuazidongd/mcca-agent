@@ -183,6 +183,9 @@ Values may reference environment variables:
   The distinction matters because the portal rewrites `config/mcp.json` on
   every enable/disable toggle — resolving earlier would persist this machine's
   paths back into the file.
+- Only the POSIX form is recognised. `%VAR%` is not expanded, and there is no
+  escape sequence for a literal `${...}` in a value, so an entry that needs
+  those characters literally has to be written another way.
 
 ### dsh MCP rows
 
