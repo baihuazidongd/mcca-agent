@@ -1,5 +1,5 @@
 {
-  "name": "@pi-dsh-bridge/plugin-sdk",
+  "name": "@mcca/plugin-sdk",
   "version": "0.1.0",
   "description": "Neutral plugin contract shared by the DeepSeek Harness and pi adapters",
   "type": "module",

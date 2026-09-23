@@ -1,0 +1,7 @@
+{
+  "name": "@mcca/agent-ide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Feature memory, project memory, and Windows computer control for both agents."
+}

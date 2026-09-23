@@ -17,7 +17,7 @@ import { generateMcpPatch } from "./gen-dsh-mcp-patch.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG_DIR = path.join(ROOT, "config");
-const DSH_HOME = process.env.PDB_DSH_HOME || path.join(CONFIG_DIR, "dsh-home");
+const DSH_HOME = process.env.MCCA_DSH_HOME || path.join(CONFIG_DIR, "dsh-home");
 const PROFILE_DIR = path.join(DSH_HOME, "profiles", "web");
 
 /** Committed templates carry {{ROOT}}; generated files carry the real path. */

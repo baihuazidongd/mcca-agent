@@ -1,0 +1,13 @@
+{
+  "name": "@mcca/mobile-bridge",
+  "version": "0.1.0",
+  "description": "Mobile access layer: aggregates pi-web + portal into a compact QQ-style protocol (LAN WebSocket + relay client)",
+  "main": "./server.cjs",
+  "private": true,
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

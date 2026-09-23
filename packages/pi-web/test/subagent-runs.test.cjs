@@ -28,6 +28,34 @@ test("background tool end stays working until async terminal", () => {
   assert.equal(snap.runs[0].status, "working");
 });
 
+test("foreground workflow (async:false) finalizes children instead of leaving them working", () => {
+  const registry = new SubagentRuns({ dir: tmpDir(), sessionId: "sess-a" });
+  registry.begin("call-wf", { async: false, workflowScript: "runs.all([])" });
+  registry.tool("call-wf", {
+    content: [{ type: "text", text: "Run fan-out: 1/64 used\nWorkflow completed." }],
+    details: {
+      id: "call-wf",
+      mode: "workflow",
+      progress: [{ index: 0, agent: "reviewer", model: "OpenCode Go X/deepseek-flash:high", thinking: "high", status: "working" }],
+    },
+  }, true, true);
+  const errored = registry.snapshot().runs[0];
+  assert.equal(errored.agent, "reviewer");
+  assert.equal(errored.status, "failed");
+
+  const ok = new SubagentRuns({ dir: tmpDir(), sessionId: "sess-b" });
+  ok.begin("call-wf2", { async: false, workflowScript: "runs.all([])" });
+  ok.tool("call-wf2", {
+    content: [{ type: "text", text: "Run fan-out: 1/64 used\nWorkflow completed." }],
+    details: {
+      id: "call-wf2",
+      mode: "workflow",
+      progress: [{ index: 0, agent: "reviewer", status: "working" }],
+    },
+  }, true, false);
+  assert.equal(ok.snapshot().runs[0].status, "completed");
+});
+
 test("management tool calls do not create icons", () => {
   const registry = new SubagentRuns({ dir: tmpDir(), sessionId: "sess-a" });
   registry.begin("call-m", { action: "list" });
@@ -77,21 +105,24 @@ test("sessions are isolated and disabled does not cover working", () => {
   assert.equal(a.snapshot([{ name: "worker", disabled: true }]).agents[0].status, "stopped");
 });
 
-test("atomic restore turns stale foreground working into unknown", () => {
+test("atomic restore normalizes stale working runs and fails orphans", () => {
   const dir = tmpDir();
   const file = path.join(dir, "sess-a.json");
+  const asyncDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-async-"));
   fs.writeFileSync(file, JSON.stringify({
     version: 1,
     sessionId: "sess-a",
     runs: [
       { id: "fg:0", runId: "fg", index: 0, agent: "worker", status: "working", background: false, startedAt: 1 },
-      { id: "bg:0", runId: "bg", index: 0, agent: "oracle", status: "working", background: true, startedAt: 2 },
+      { id: "bg:0", runId: "bg", index: 0, agent: "oracle", status: "working", background: true, startedAt: 2, asyncDir },
+      { id: "orphan:0", runId: "orphan", index: 0, agent: "scout", status: "working", background: true, startedAt: 3 },
     ],
   }));
   const restored = new SubagentRuns({ dir, sessionId: "sess-a" });
   const byAgent = Object.fromEntries(restored.snapshot().agents.map((agent) => [agent.agent, agent.status]));
   assert.equal(byAgent.worker, "unknown");
   assert.equal(byAgent.oracle, "working");
+  assert.equal(byAgent.scout, "failed");
 });
 
 test("stop writes control file and keeps working until terminal", async () => {
@@ -166,7 +197,7 @@ test("path-style status.json sessionId still completes the run", () => {
   const sessionId = "01a07ad9-21de-7006-84b6-5b6742496634";
   fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
     runId: "async-1",
-    sessionId: "D:\\ws\\sessions\\2026-09-07T07-50-45-470Z_" + sessionId + ".jsonl",
+    sessionId: "D:\\dshpi\\sessions\\2026-09-07T07-50-45-470Z_" + sessionId + ".jsonl",
     state: "complete",
     steps: [{
       agent: "worker",

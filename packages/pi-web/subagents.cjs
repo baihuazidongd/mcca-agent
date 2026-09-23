@@ -14,12 +14,12 @@ const CONFIG_FIELDS = ["description", "model", "fallbackModels", "thinking", "sy
 const SOURCE_RANK = { builtin: 0, package: 1, user: 2, project: 3 };
 
 function agentDir() {
-  return process.env.PDB_AGENT_DIR
+  return process.env.MCCA_AGENT_DIR
     || path.join(process.env.USERPROFILE || process.env.HOME || "", ".pi", "agent");
 }
 
 function packageRoot() {
-  const bases = [process.env.PDB_AGENT_DIR, path.join(process.env.USERPROFILE || process.env.HOME || "", ".pi", "agent")].filter(Boolean);
+  const bases = [process.env.MCCA_AGENT_DIR, path.join(process.env.USERPROFILE || process.env.HOME || "", ".pi", "agent")].filter(Boolean);
   for (const base of bases) {
     const root = path.join(base, "npm", "node_modules", "pi-subagents");
     if (fs.existsSync(path.join(root, "package.json"))) return root;

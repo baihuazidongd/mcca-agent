@@ -24,7 +24,7 @@ registration calls.
                        │                    │                   │
                        ▼                    ▼                   ▼
                  ┌───────────────────────────────────────────────────┐
-                 │  @pi-dsh-bridge/plugin-host  (runtime-agnostic)   │
+                 │  @mcca/plugin-host  (runtime-agnostic)            │
                  │  discovery · enable state · load/unload · isolate │
                  └───────────┬───────────────────────┬───────────────┘
                              │ PluginApiImpl         │ PluginApiImpl

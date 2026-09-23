@@ -1,4 +1,4 @@
-// One-off smoke check for @pi-dsh-bridge/portal: boots the portal, fetches static
+// One-off smoke check for @mcca/portal: boots the portal, fetches static
 // assets, exercises the management API, and starts/stops the pi child process.
 // Not part of `pnpm test`.
 //

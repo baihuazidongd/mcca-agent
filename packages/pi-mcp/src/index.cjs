@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * @pi-dsh-bridge/pi-mcp — MCP client for pi.
+ * @mcca/pi-mcp — MCP client for pi.
  *
  * Reads MCP server configs (shared registry + any servers plugins register
  * through the adapter) and exposes each server's tools as pi tools named
@@ -125,11 +125,6 @@ class StdioJsonRpc {
         // fix. Retry the full command line through cmd.exe once.
         if (!viaCmd && process.platform === "win32" && error.code === "ENOENT") {
           viaCmd = true;
-          // The whole line goes through one cmd.exe invocation. With /s, cmd
-          // strips the outer quote pair, so a token containing both spaces and
-          // shell metacharacters could be re-split here. Only bare command names
-          // that resolve to a .cmd shim reach this path - an absolute path is
-          // spawned directly above - so keep it that way if you add a server.
           const line = [this.command, ...this.args].map(windowsQuote).join(" ");
           const shelled = spawn("cmd.exe", ["/d", "/s", "/c", line], spawnOpts);
           this.child = shelled;
@@ -327,7 +322,7 @@ class McpClient {
     const init = await this.requestWithTimeout("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "pdb-pi-mcp", version: "0.1.0" },
+      clientInfo: { name: "mcca-pi-mcp", version: "0.1.0" },
     });
     await this.transport.notify("notifications/initialized", {});
     this.serverInfo = init?.serverInfo;
@@ -352,10 +347,17 @@ class McpClient {
 /** Convert an MCP tools/call result into pi's AgentToolResult shape. */
 function normalizeMcpToolResult(raw) {
   const content = Array.isArray(raw?.content)
-    ? raw.content.map((part) => ({
-        type: part?.type || "text",
-        text: part?.text !== undefined ? String(part.text) : JSON.stringify(part),
-      }))
+    ? raw.content.map((part) => {
+        // Playwright screenshots arrive as MCP image blocks. Keep the bytes
+        // so the model can see the page; stringifying them is not a picture.
+        if (part?.type === "image" && typeof part.data === "string") {
+          return { type: "image", data: part.data, mimeType: part.mimeType || "image/png" };
+        }
+        return {
+          type: "text",
+          text: part?.text !== undefined ? String(part.text) : JSON.stringify(part),
+        };
+      })
     : [{ type: "text", text: JSON.stringify(raw ?? {}) }];
   const out = { content };
   const details = {};
@@ -363,6 +365,58 @@ function normalizeMcpToolResult(raw) {
   if (raw?.isError) details.isError = true;
   if (Object.keys(details).length) out.details = details;
   return out;
+}
+
+function isBackgroundMcpTool(config, toolName, tool) {
+  const selection = config?.backgroundTools ?? config?.asyncTools;
+  if (selection === true) return true;
+  return (Array.isArray(selection) && selection.includes(toolName)) || tool?.background === true || tool?.annotations?.background === true;
+}
+
+function sendBackgroundMessage(pi, message) {
+  if (typeof pi?.sendMessage !== "function") return;
+  try {
+    Promise.resolve(pi.sendMessage(message, { triggerTurn: true })).catch(() => {});
+  } catch {
+    // The session may have been replaced while the detached MCP call was running.
+  }
+}
+
+function runBackgroundMcpTool(pi, entry, config, tool, toolCallId, params) {
+  const taskId = `async-${Date.now().toString(36)}-${String(toolCallId || "tool").slice(-12)}`;
+  const startedAt = Date.now();
+  Promise.resolve()
+    .then(() => entry.client.callTool(tool.name, params))
+    .then((raw) => {
+      const normalized = normalizeMcpToolResult(raw);
+      const textRaw = normalized.content
+        .filter((part) => part?.type === "text")
+        .map((part) => String(part.text || ""))
+        .filter(Boolean)
+        .join("\n") || "（工具未返回文本结果）";
+      const text = textRaw.length > 12000 ? `${textRaw.slice(0, 11980)}\n…（结果已截断）` : textRaw;
+      sendBackgroundMessage(pi, {
+        customType: "async-tool-result",
+        content: [
+          { type: "text", text: `【异步工具完成】${tool.name}\n${text}` },
+          ...normalized.content.filter((part) => part?.type === "image"),
+        ],
+        display: true,
+        details: { background: true, taskId, toolCallId, toolName: `mcp__${config.serverName}__${tool.name}`, durationMs: Date.now() - startedAt },
+      });
+    })
+    .catch((error) => {
+      sendBackgroundMessage(pi, {
+        customType: "async-tool-result",
+        content: `【异步工具失败】${tool.name}\n${error instanceof Error ? error.message : String(error)}`,
+        display: true,
+        details: { background: true, taskId, toolCallId, toolName: `mcp__${config.serverName}__${tool.name}`, durationMs: Date.now() - startedAt, error: true },
+      });
+    });
+  return {
+    content: [{ type: "text", text: `已将工具「${tool.name}」放到后台执行，完成后会通知对话。` }],
+    details: { background: true, taskId, toolCallId, toolName: `mcp__${config.serverName}__${tool.name}`, startedAt },
+  };
 }
 
 /**
@@ -386,7 +440,7 @@ function readMcpServers(configPath) {
  * Create the pi extension factory that registers MCP tools.
  *
  * @param {object} [options]
- * @param {Array<import("@pi-dsh-bridge/plugin-sdk").McpServerConfig>} [options.servers]
+ * @param {Array<import("@mcca/plugin-sdk").McpServerConfig>} [options.servers]
  * @param {string} [options.cwd]
  * @param {(message: string) => void} [options.logger]
  * @param {Function} [options.fetchImpl]  Injectable fetch for the SSE transport (tests).
@@ -407,7 +461,6 @@ function mcpCacheKey(config) {
     config.command,
     config.args,
     config.url,
-    config.headers,
     config.env,
   ]);
 }
@@ -506,11 +559,16 @@ function createPiMcpExtension(options = {}) {
         pi.registerTool({
           name: toolName,
           label: toolName,
-          description: tool.description || `MCP tool ${tool.name} from ${config.serverName}`,
+          description: isBackgroundMcpTool(config, tool.name, tool)
+            ? `${tool.description || `MCP tool ${tool.name} from ${config.serverName}`}\n\n[异步工具] 调用后会立即返回，完成时系统会发送结果消息；不要等待本次调用，也不要重复提交同一任务。`
+            : (tool.description || `MCP tool ${tool.name} from ${config.serverName}`),
           parameters: tool.inputSchema || { type: "object", properties: {} },
           async execute(_toolCallId, params, signal) {
             if (signal?.aborted) {
               return { content: [{ type: "text", text: "Cancelled" }], details: { cancelled: true } };
+            }
+            if (isBackgroundMcpTool(config, tool.name, tool)) {
+              return runBackgroundMcpTool(pi, entry, config, tool, _toolCallId, params);
             }
             const raw = await entry.client.callTool(tool.name, params);
             return normalizeMcpToolResult(raw);
@@ -525,7 +583,6 @@ module.exports = {
   createPiMcpExtension,
   readMcpServers,
   expandEnv,
-  mcpCacheKey,
   McpClient,
   StdioJsonRpc,
   HttpJsonRpc,

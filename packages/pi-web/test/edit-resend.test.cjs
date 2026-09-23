@@ -63,10 +63,10 @@ test("edit resends as a new branch: reset replay + edited user message", async (
     cwd,
     env: {
       ...process.env,
-      PI_WEB_PORT: "3471",
-      PI_PORT: "3471",
-      PDB_PI_WEB_SESSIONS: sessions,
-      PDB_PI_WEB_SETTINGS: path.join(tmp, "settings.json"),
+      PI_WEB_PORT: "3467",
+      PI_PORT: "3467",
+      MCCA_PI_WEB_SESSIONS: sessions,
+      MCCA_PI_WEB_SETTINGS: path.join(tmp, "settings.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -79,6 +79,9 @@ test("edit resends as a new branch: reset replay + edited user message", async (
         clearTimeout(timer);
         child.stdout.off("data", onData);
         child.stderr.off("data", onData);
+        // 继续抽空管道：子进程日志写满 stdout pipe 后会阻塞整个事件循环，SSE 帧再也发不出来
+        child.stdout.resume();
+        child.stderr.resume();
         resolve(Number(match[1]));
       }
     };
@@ -93,7 +96,12 @@ test("edit resends as a new branch: reset replay + edited user message", async (
 
   const sse = subscribe(base + "/api/sessions/" + id + "/stream");
   t.after(() => sse.close());
-  await new Promise((r) => setTimeout(r, 800));
+  // 等首帧回放再动手：subscribe 会触发会话 attach，机器忙时 SDK 装载要几十秒，
+  // 固定 sleep 会抢跑，后面就等不到 transcript-reset
+  for (let i = 0; i < 120 && sse.frames.length === 0; i += 1) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  assert.ok(sse.frames.length > 0, "subscribe should replay the transcript");
 
   const edit = await request(base + "/api/sessions/" + id + "/edit", {
     method: "POST",
@@ -101,8 +109,11 @@ test("edit resends as a new branch: reset replay + edited user message", async (
   });
   assert.equal(edit.status, 200, "edit should succeed: " + edit.body);
 
-  // 等待 transcript-reset + user 事件（prompt 无模型会以错误收尾，也一并等待）
-  await new Promise((r) => setTimeout(r, 2500));
+  // 等 transcript-reset + user 事件（prompt 无模型会以错误收尾，也一并等待）。
+  // 机器忙时子进程主线程会被 SDK 装载占住几十秒，固定 sleep 会抢跑。
+  for (let i = 0; i < 120 && !sse.frames.some((f) => f.event && f.event.type === "transcript-reset"); i += 1) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const types = sse.frames.map((f) => f.event.type);
   assert.equal(types.includes("transcript-reset"), true, "expected transcript-reset, got: " + types.join(","));
   const reset = sse.frames.find((f) => f.event.type === "transcript-reset").event;
@@ -116,8 +127,10 @@ test("edit resends as a new branch: reset replay + edited user message", async (
   assert.ok(userIdx > types.lastIndexOf("transcript-reset"), "resend user event should follow the reset");
   const resent = sse.frames[userIdx].event;
   assert.equal(resent.text, "second question EDITED");
-  // 落盘后补推条目 id
-  await new Promise((r) => setTimeout(r, 1500));
+  // 落盘后补推条目 id（同机忙时也要给足时间）
+  for (let i = 0; i < 60 && !sse.frames.some((f) => f.event.type === "user-id"); i += 1) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const idFrames = sse.frames.filter((f) => f.event.type === "user-id");
   assert.equal(idFrames.length, 1, "expected one user-id frame, got: " + JSON.stringify(sse.frames.map((f) => f.event.type)));
   assert.ok(idFrames[0].event.id, "user-id carries entry id");

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pdb",
+  "productName": "mcca",
   "version": "0.1.0",
-  "identifier": "com.pdb.desktop",
+  "identifier": "com.mcca.desktop",
   "build": {
     "frontendDist": "../dist"
   },
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "pdb",
+        "title": "mcca",
         "width": 1280,
         "height": 860,
         "url": "http://127.0.0.1:3470",

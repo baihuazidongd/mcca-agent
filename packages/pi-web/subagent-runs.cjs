@@ -6,6 +6,10 @@ const crypto = require("node:crypto");
 
 const TERMINAL = new Set(["completed", "stopped", "failed"]);
 const MANAGEMENT_ACTIONS = new Set(["list", "get", "models", "create", "update", "delete", "eject", "disable", "enable", "reset"]);
+// A run with no async directory / child session can never be reconciled from
+// disk. If it is still "working" after this long, a live run is implausible
+// (foreground launches are capped at 30 min), so it is an orphan.
+const ORPHAN_MAX_AGE_MS = 60 * 60 * 1000;
 
 function clip(value, limit = 16000) {
   return typeof value === "string" ? value.slice(0, limit) : "";
@@ -67,10 +71,23 @@ function asyncIdFrom(result, details, text) {
 
 function sameSession(left, right) {
   if (left == null || right == null) return false;
-  const a = String(left);
-  const b = String(right);
+  const a = String(left).toLowerCase();
+  const b = String(right).toLowerCase();
   if (a === b) return true;
-  return a.length >= 8 && b.length >= 8 && (a.includes(b) || b.includes(a));
+  if (a.length >= 8 && b.length >= 8 && (a.includes(b) || b.includes(a))) return true;
+  // pi-subagents 往 async status.json 里写的 sessionId 是「父会话文件路径」，而且
+  // 长路径会按字符截断（只留前 96 字符，连 .jsonl 和 uuid 尾巴都没了）。和 uuid
+  // 直接比永远不等，整条 run 的完成状态就被当成"别的会话"丢掉——这里按 uuid 前缀
+  // 宽松对齐（截断只会少尾巴，不会少开头）。
+  const uuidOf = (s) => {
+    const m = s.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{0,12})/);
+    return m ? m[1] : "";
+  };
+  const ua = uuidOf(a);
+  const ub = uuidOf(b);
+  if (!ua || !ub) return false;
+  const n = Math.min(ua.length, ub.length);
+  return n >= 8 && ua.slice(0, n) === ub.slice(0, n);
 }
 
 function idFromSessionFile(file) {
@@ -102,7 +119,13 @@ function conversationEvents(events) {
     if (event.type === "user") {
       const text = extractDelegatedTask(event.text);
       if (text) out.push({ ...event, text });
-    } else if (event.type === "assistant-end" && (event.text || event.error)) {
+    } else if (event.type === "assistant-end") {
+      // 思考块单独成条：子代理对话要跟主对话一样能看到「在想什么」
+      if (event.thinking) out.push({ type: "thinking", text: event.thinking, ...(event.at ? { at: event.at } : {}) });
+      if (event.text || event.error) out.push(event);
+    } else if (event.type === "tool") {
+      // 工具调用原样保留（含 start/end、参数、输出、失败标记）：不然子代理卡在
+      // 某个命令上时，界面只有一片空白，用户根本分不清是在跑还是死了
       out.push(event);
     }
   }
@@ -128,7 +151,7 @@ class SubagentRuns {
     this.sources = new Map();
     this.lastError = null;
     this.restore();
-    this.refreshFiles(false);
+    if (this.refreshFiles(false)) this.save();
   }
 
   restore() {
@@ -232,7 +255,13 @@ class SubagentRuns {
       this.calls.delete(callId);
       return changed;
     }
-    const background = Boolean(details.background || details.asyncId || details.mode === "workflow" || args.async === true);
+    // An explicit async:false launch is foreground even when details report
+    // mode "workflow": the workflow settles inside this tool call, so it must be
+    // finalized from the results below rather than left waiting for an
+    // async-complete event that a foreground workflow never emits.
+    const background = args.async === false
+      ? false
+      : Boolean(details.background || details.asyncId || details.mode === "workflow" || args.async === true);
     let changed = false;
     for (const progress of details.progress || []) {
       if (!progress.agent || progress.status === "pending" || progress.status === "queued") continue;
@@ -259,6 +288,21 @@ class SubagentRuns {
         result: assistantText(item), error: item.error,
       });
       changed = true;
+    }
+    // Foreground launches settle inside this tool call. Whatever the progress
+    // and results loops left open must be closed here, or a failed child (for
+    // example a provider 400) stays "working" forever with no terminal event.
+    if (final && !background) {
+      for (const run of this.runs.values()) {
+        if (run.runId !== runId || TERMINAL.has(run.status)) continue;
+        this.put({
+          ...run,
+          status: isError ? "failed" : "completed",
+          error: run.error || (isError ? clip(text, 4000) : undefined),
+          endedAt: run.endedAt || Date.now(),
+        });
+        changed = true;
+      }
     }
     if (background && details.asyncDir) {
       this.sources.set(runId, details.asyncDir);
@@ -377,8 +421,35 @@ class SubagentRuns {
         if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) this.lastError = error.message;
       }
     }
+    changed = this.reconcileOrphans() || changed;
     changed = changed && before !== JSON.stringify([...this.runs.values()]);
     if (changed && persist) this.save();
+    return changed;
+  }
+
+  /**
+   * Fail runs that can never be reconciled from disk: still "working"/"unknown"
+   * with no async directory, child session, or transcript, and old enough that
+   * a live run is implausible. Prevents a phantom "工作中" row after a child
+   * dies without emitting a terminal event.
+   */
+  reconcileOrphans(maxAgeMs = ORPHAN_MAX_AGE_MS) {
+    const now = Date.now();
+    let changed = false;
+    for (const run of this.runs.values()) {
+      if (run.status !== "working") continue;
+      if (run.asyncDir || run.sessionFile || run.transcriptPath || run.childSessionId) continue;
+      if (this.sources.get(run.runId)) continue;
+      const startedAt = run.startedAt || 0;
+      if (!startedAt || now - startedAt < maxAgeMs) continue;
+      this.put({
+        ...run,
+        status: "failed",
+        error: run.error || "Orphaned run: no async directory or child session to reconcile.",
+        endedAt: run.endedAt || now,
+      });
+      changed = true;
+    }
     return changed;
   }
 
@@ -409,6 +480,7 @@ class SubagentRuns {
   }
 
   snapshot(configured = []) {
+    this.reconcileOrphans();
     const runs = [...this.runs.values()].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
     const names = [...new Set(runs.map((run) => run.agent))];
     const agents = names.map((agent) => {

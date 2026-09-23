@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * @pi-dsh-bridge/pi-dsh-web — 预设上下文（preset context）核心。
+ * @mcca/pi-dsh-web — 预设上下文（preset context）核心。
  *
  * 预设（preset）是用户命名的规则分组；每条消息发送时，该会话勾选的预设里的
  * 启用规则按固定顺序追加到本回合的系统提示词（会话级多选，勾选持久化）。
@@ -10,8 +10,8 @@
  *
  * 存储与全局性：
  *   - 配置落盘在 pi 全局 agent 目录（AGENT_DIR/dsh-web-settings.json，可用
- *     PDB_AGENT_DIR 覆盖），与工作区无关——同一份预设对所有工作区/会话可用，
- *     不被任何固定目录（如某个固定检出目录）绑死。
+ *     MCCA_AGENT_DIR 覆盖），与工作区无关——同一份预设对所有工作区/会话可用，
+ *     不被任何固定目录（如 D:\dshpi）绑死。
  *   - 兼容旧版：全局文件缺少 `preset-context` 段时回退读工作区
  *     dsh-web-settings.json 的同名字段（旧版扁平 rules 自动迁移成一个
  *     「默认预设」并设为默认启用）；写入只落全局文件，不回写旧文件。

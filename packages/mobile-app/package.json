@@ -1,0 +1,11 @@
+{
+  "name": "@mcca/mobile-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "mcca 手机 App（原生 Kotlin + Jetpack Compose）：QQ 式会话列表、流式聊天、任务状态与通知、桌面进程管理",
+  "scripts": {
+    "apk": "gradlew.bat assembleRelease",
+    "apk:debug": "gradlew.bat assembleDebug",
+    "install:debug": "gradlew.bat installDebug"
+  }
+}

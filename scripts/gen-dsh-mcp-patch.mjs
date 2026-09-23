@@ -31,7 +31,7 @@ function readServers(mcpConfigPath) {
 export function mcpRow(cfg) {
   if (!cfg || typeof cfg.serverName !== "string" || !cfg.serverName) return null;
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(cfg.serverName)) {
-    console.warn(`[pdb] skipping MCP server "${cfg.serverName}": dsh requires [A-Za-z0-9_-]{1,32}`);
+    console.warn(`[mcca] skipping MCP server "${cfg.serverName}": dsh requires [A-Za-z0-9_-]{1,32}`);
     return null;
   }
   const config = { serverName: cfg.serverName };
@@ -47,7 +47,7 @@ export function mcpRow(cfg) {
     if (cfg.headers !== undefined) config.headers = cfg.headers;
   }
   return {
-    id: `pdb-mcp-${cfg.serverName}`,
+    id: `mcca-mcp-${cfg.serverName}`,
     name: "@deepseek-ai/dsh-mcp-client",
     config,
   };
@@ -57,10 +57,8 @@ export function generateMcpPatch(mcpConfigPath, outPath) {
   const rows = readServers(mcpConfigPath)
     // `dsh: false` marks servers dsh already mounts through its own profile
     // patch (e.g. copied dsh-home rows); emitting them again would collide on
-    // serverName. Those rows still reach the pi side via @pi-dsh-bridge/pi-mcp.
-    // `disabledDs` is the portal's per-agent toggle for dsh; skipping it here is
-    // what makes that toggle actually unmount the row.
-    .filter((cfg) => cfg?.dsh !== false && cfg?.disabledDs !== true)
+    // serverName. Those rows still reach the pi side via @mcca/pi-mcp.
+    .filter((cfg) => cfg?.dsh !== false)
     .map(mcpRow)
     .filter(Boolean);
   const body = rows.length
@@ -78,5 +76,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     path.join(ROOT, "config", "mcp.json"),
     path.join(ROOT, "config", "dsh-mcp.patch.yml"),
   );
-  console.log(`[pdb] dsh-mcp.patch.yml: ${rows.length} server row(s)`);
+  console.log(`[mcca] dsh-mcp.patch.yml: ${rows.length} server row(s)`);
 }

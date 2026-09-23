@@ -1,5 +1,5 @@
 {
-  "name": "@pi-dsh-bridge/pi-web",
+  "name": "@mcca/pi-web",
   "description": "pi backend's native web UI: REST + SSE over pi's SessionManager (rewrite of the retired pi-dsh-web compat layer)",
   "version": "0.1.0",
   "private": true,
@@ -9,8 +9,8 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@fontsource/fusion-pixel-12px-proportional-sc": "^5.3.0",
-    "@pi-dsh-bridge/pi-adapter": "workspace:*",
-    "@pi-dsh-bridge/pi-mcp": "workspace:*",
+    "@mcca/pi-adapter": "workspace:*",
+    "@mcca/pi-mcp": "workspace:*",
     "diff": "^9.0.0"
   }
 }

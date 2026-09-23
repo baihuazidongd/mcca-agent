@@ -21,8 +21,8 @@ const { createPiAdapter } = require("./index.cjs");
 // three levels up.
 const ROOT = path.resolve(__dirname, "..", "..", "..");
 
-const pluginsDir = process.env.PDB_PLUGINS_DIR || path.join(ROOT, "plugins");
-const configPath = process.env.PDB_PLUGINS_CONFIG || path.join(ROOT, "config", "plugins.json");
-const cwd = process.env.PDB_CWD || ROOT;
+const pluginsDir = process.env.MCCA_PLUGINS_DIR || path.join(ROOT, "plugins");
+const configPath = process.env.MCCA_PLUGINS_CONFIG || path.join(ROOT, "config", "plugins.json");
+const cwd = process.env.MCCA_CWD || ROOT;
 
 module.exports = createPiAdapter({ pluginsDir, configPath, cwd });

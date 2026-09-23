@@ -46,8 +46,8 @@ test("API and UI smoke on an isolated port", async (t) => {
       ...process.env,
       PI_WEB_PORT: "3468",
       PI_PORT: "3468",
-      PDB_PI_WEB_SESSIONS: path.join(tmp, "sessions"),
-      PDB_PI_WEB_SETTINGS: path.join(tmp, "settings.json"),
+      MCCA_PI_WEB_SESSIONS: path.join(tmp, "sessions"),
+      MCCA_PI_WEB_SETTINGS: path.join(tmp, "settings.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -60,6 +60,9 @@ test("API and UI smoke on an isolated port", async (t) => {
       if (match) {
         clearTimeout(timer);
         child.stdout.off("data", onData);
+        // 继续抽空管道：子进程日志写满 stdout pipe 后会阻塞整个事件循环
+        child.stdout.resume();
+        child.stderr.resume();
         resolve(Number(match[1]));
       }
     };

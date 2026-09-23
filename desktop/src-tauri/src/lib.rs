@@ -18,7 +18,7 @@ fn portal_reachable() -> bool {
 
 fn spawn_portal(app: &tauri::AppHandle) {
     if portal_reachable() {
-        return; // already running (e.g. started by launch-pdb.ps1 or manually)
+        return; // already running (e.g. started by launch-mcca.ps1 or manually)
     }
 
     // Repo root = the ancestor of the exe that contains packages/portal.
@@ -35,7 +35,7 @@ fn spawn_portal(app: &tauri::AppHandle) {
         });
 
     let Some(root) = root else {
-        eprintln!("[pdb] packages/portal/server.cjs not found; cannot auto-start portal");
+        eprintln!("[mcca] packages/portal/server.cjs not found; cannot auto-start portal");
         return;
     };
 
@@ -69,7 +69,7 @@ fn spawn_portal(app: &tauri::AppHandle) {
                 }
             });
         }
-        Err(e) => eprintln!("[pdb] failed to auto-start portal: {e}"),
+        Err(e) => eprintln!("[mcca] failed to auto-start portal: {e}"),
     }
 }
 
@@ -82,17 +82,9 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building pdb desktop")
-        .run(|app_handle, event| {
-            // If we spawned the portal, stop it when the app exits.
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<PortalChild>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(mut child) = guard.take() {
-                            let _ = child.kill();
-                        }
-                    }
-                }
-            }
+        .expect("error while building mcca desktop")
+        .run(|_app_handle, _event| {
+            // 关掉窗口不结束门户，也不结束它拉起的 IDE。
+            // 门户和 IDE 都脱离了这个窗口，下次打开再接上还在跑的进程。
         });
 }

@@ -1,9 +1,10 @@
 /**
- * @pi-dsh-bridge/hot-mount — 宿主插件的热挂载监管器（根治“改插件必须重启”）。
+ * @mcca/hot-mount — 宿主插件的热挂载监管器（根治“改插件必须重启”）。
  *
- * 问题：pdb 的宿主插件（dsh-adapter / session-delete / task-notify …）原先各占
- * 一条启动期 patch 行。patch 行只在启动时读一次，行里的 file:// 说明符又被
- * Node 的 ESM 缓存钉死——于是新增插件要重启、删插件要重启、连改一行源码都要重启。
+ * 问题：mcca 的宿主插件（dsh-adapter / session-delete / task-notify …）原先各占
+ * 一条 `--patch config/dsh.patch.yml` 行。patch 覆盖层只在启动时读一次，行里的
+ * file:// 说明符又被 Node 的 ESM 缓存钉死——于是新增插件要重启、删插件要重启、
+ * 连改一行源码都要重启。
  *
  * 本插件把“插件集”从启动期配置变成运行期清单：
  *   1. 读 `config/hot-plugins.json`：`[{ id, file, config? }]`；
@@ -16,7 +17,7 @@
  * 监管器自身仍是启动期一行，且放在 profile 的 `cordis.patch.yml`（被
  * watchUserPatches 实时监听），所以连这一行以后也能热改。
  *
- * 观测面：`GET /pdb/hot-plugins` 返回每条的挂载状态/版本/错误，用于验证
+ * 观测面：`GET /mcca/hot-plugins` 返回每条的挂载状态/版本/错误，用于验证
  * “不重启就生效”。
  */
 
@@ -25,7 +26,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Cordis function plugin name. */
-export const name = "pdb-hot-mount";
+export const name = "mcca-hot-mount";
 
 /** Services required before the supervisor may mount children. */
 export const inject = ["webServer"];
@@ -132,9 +133,9 @@ export function apply(ctx, config) {
     inFlight.push(`dispose:${id}`);
     try {
       const outcome = await withTimeout(record.fiber.dispose(), SETTLE_MS, "timeout");
-      if (outcome === "timeout") console.warn(`[pdb-hot] dispose ${id} still running after ${SETTLE_MS}ms; moving on`);
+      if (outcome === "timeout") console.warn(`[mcca-hot] dispose ${id} still running after ${SETTLE_MS}ms; moving on`);
     } catch (error) {
-      console.error(`[pdb-hot] dispose ${id} failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[mcca-hot] dispose ${id} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       const at = inFlight.lastIndexOf(`dispose:${id}`);
       if (at >= 0) inFlight.splice(at, 1);
@@ -189,7 +190,7 @@ export function apply(ctx, config) {
         pending: outcome === "pending", waitingFor,
       });
       console.log(
-        `[pdb-hot] mounted ${entry.id} (${face.name}) rev=${rev}`
+        `[mcca-hot] mounted ${entry.id} (${face.name}) rev=${rev}`
         + (outcome === "pending" ? ` — pending on [${waitingFor.join(", ")}]` : ""),
       );
     } catch (error) {
@@ -201,7 +202,7 @@ export function apply(ctx, config) {
       mounted.set(entry.id, {
         file: entry.file, rev, fiber: null, mountedAt: Date.now(), error: message, pending: false, waitingFor: [],
       });
-      console.error(`[pdb-hot] mount ${entry.id} failed: ${message}`);
+      console.error(`[mcca-hot] mount ${entry.id} failed: ${message}`);
     }
   }
 
@@ -226,7 +227,7 @@ export function apply(ctx, config) {
 
   ctx.effect(() => ctx.webServer.register({
     kind: "exact",
-    path: "/pdb/hot-plugins",
+    path: "/mcca/hot-plugins",
     handler: async (_req, res) => {
       const { entries } = readManifest(manifestPath);
       const plugins = entries.map((entry) => {
@@ -261,7 +262,7 @@ export function apply(ctx, config) {
         plugins,
       }));
     },
-  }), "pdb-hot-mount: status route");
+  }), "mcca-hot-mount: status route");
 
   ctx.effect(() => {
     void tick();
@@ -270,5 +271,5 @@ export function apply(ctx, config) {
       clearInterval(timer);
       return Promise.all([...mounted.keys()].map((id) => unmount(id)));
     };
-  }, "pdb-hot-mount: manifest poll");
+  }, "mcca-hot-mount: manifest poll");
 }

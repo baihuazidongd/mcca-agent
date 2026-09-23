@@ -6,6 +6,27 @@
   <meta name="autocomplete" content="off" />
   <title>PI 编程助手</title>
   <link rel="stylesheet" href="/style.css" />
+  <script>
+    // 样式表偶发加载失败（pi-web 重启中 / 请求抖动 / 服务端读文件失败）时，
+    // 浏览器会拿缓存里的 HTML 配一张没有的 CSS，整页裸奔、只能手动刷新。
+    // 这里自愈：带时间戳重试最多 3 次，成功就替换掉原来那张。
+    (function () {
+      var link = document.querySelector('link[rel="stylesheet"][href="/style.css"]');
+      if (!link) return;
+      function retry(n) {
+        if (n > 3) return;
+        setTimeout(function () {
+          var next = document.createElement("link");
+          next.rel = "stylesheet";
+          next.href = "/style.css?retry=" + n + "&t=" + Date.now();
+          next.onload = function () { link.remove(); link = next; };
+          next.onerror = function () { next.remove(); retry(n + 1); };
+          document.head.appendChild(next);
+        }, 400 * n);
+      }
+      link.addEventListener("error", function () { retry(1); });
+    })();
+  </script>
 </head>
 <body>
   <div id="app">
@@ -17,6 +38,15 @@
       </div>
       <div class="ws-row">
         <div id="workspace-picker" class="dd-host"></div>
+        <button id="btn-open-workspace" class="ws-open-btn" type="button" hidden title="在资源管理器中打开当前工作区文件夹" aria-label="打开工作区文件夹">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <path d="M1.5 3.5h4.2l1.2 1.6h7.6v7.4h-13z" fill="#f0c96a" stroke="#3b2f1e" stroke-width="1.2" stroke-linejoin="round" />
+            <path d="M1.5 5.6h13" stroke="#3b2f1e" stroke-width="1.2" fill="none" />
+          </svg>
+        </button>
+        <button id="btn-order" class="ws-order-btn" type="button" aria-pressed="false" title="当前：按工作区分组（点击切换：全部工作区按最近排序）" aria-label="切换会话列表排序：按工作区分组 / 全部工作区按最近排序">
+          <span class="ws-order-rail" aria-hidden="true"><span class="ws-order-knob"></span></span>
+        </button>
       </div>
       <ul id="session-list" aria-label="会话列表"></ul>
       <div class="side-menu">
@@ -31,7 +61,10 @@
 
     <!-- ── 左坞：对话定位书签轮盘 ─────────────────────────────── -->
     <div id="left-dock">
+      <button id="bm-flag" type="button" hidden aria-label="未查看的任务"></button>
       <nav id="bookmark-bar" aria-label="对话定位" hidden></nav>
+      <!-- 后台任务（运行中的工具）：对话定位下面，点开看详情 -->
+      <div id="bg-tasks" aria-label="后台任务" hidden></div>
     </div>
 
     <!-- ── 中栏：聊天面板（标签页头 + 羊皮纸 + 输入 + 状态条） ── -->
@@ -55,14 +88,24 @@
             </div>
           </div>
         </div>
+        <div id="goal-bar" class="goal-bar" hidden>
+          <span class="goal-k">目标</span>
+          <span id="goal-text"></span>
+          <span id="goal-meta"></span>
+          <button id="goal-clear" type="button" class="btn small" title="清除目标">清除</button>
+        </div>
         <div id="transcript-wrap">
           <div id="transcript" aria-live="polite"></div>
           <button id="btn-jump-bottom" title="回到最新消息" hidden>▼ 置底</button>
         </div>
         <div id="composer">
+          <div id="queue-bar" hidden aria-label="消息队列"></div>
           <div id="attach-row" hidden></div>
           <textarea id="input" rows="1" placeholder="输入你的问题或代码…（Enter 发送，Shift+Enter 换行，可粘贴/拖入图片和文件）" disabled autocomplete="off" spellcheck="false"></textarea>
-          <button id="btn-send" class="btn send" disabled>发送 ▸</button>
+          <div class="composer-actions">
+            <button id="btn-stop" class="btn stop" hidden title="停止当前任务">■</button>
+            <button id="btn-send" class="btn send" disabled>发送 ▸</button>
+          </div>
         </div>
       </section>
     </main>
@@ -139,6 +182,17 @@
         <button id="agent-disable" class="btn danger">关闭</button>
       </span>
       <button id="agent-save" class="btn primary">保存</button>
+    </div>
+  </dialog>
+  <dialog id="bg-task-dlg">
+    <div class="dlg-head">
+      <h2 id="bg-task-title">后台任务</h2>
+      <button id="bg-task-close" class="btn ghost">✕ 关闭</button>
+    </div>
+    <div class="dlg-body" id="bg-task-body"></div>
+    <div class="dlg-foot">
+      <span id="bg-task-hint" class="dim"></span>
+      <button id="bg-task-stop" class="btn danger">中断本轮</button>
     </div>
   </dialog>
   <dialog id="agent-run-dlg">
@@ -245,8 +299,6 @@
       <ul id="preset-list" class="preset-list"></ul>
       <div class="models-head"><span>上下文文件（每回合注入）</span></div>
       <div id="ctx-files"></div>
-      <label class="switch-line"><input type="checkbox" id="no-compaction" /> 上下文不压缩</label>
-      <div class="rp-note dim">开启后新会话关闭自动压缩</div>
     </div>
   </dialog>
 
@@ -288,6 +340,8 @@
   </div>
 
   <div id="toast" hidden></div>
+  <div id="pet" hidden aria-hidden="true"></div>
+  <div id="bm-flag-menu" hidden></div>
   <dialog id="files-dlg">
     <div class="dlg-head">
       <h2 id="files-title">文件</h2>

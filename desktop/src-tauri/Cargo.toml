@@ -1,11 +1,11 @@
 [package]
-name = "pdb-desktop"
+name = "mcca-desktop"
 version = "0.1.0"
-description = "pdb desktop shell (Tauri) wrapping the portal localhost"
+description = "mcca desktop shell (Tauri) wrapping the portal localhost"
 edition = "2021"
 
 [lib]
-name = "pdb_desktop_lib"
+name = "mcca_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

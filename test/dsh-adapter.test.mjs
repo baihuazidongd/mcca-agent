@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const adapter = require("@pi-dsh-bridge/dsh-adapter");
+const adapter = require("@mcca/dsh-adapter");
 const {
   createDshApiImpl,
   normalizeResult,
@@ -140,6 +140,26 @@ test("registerTool maps onto a raw dsh ToolDefinition and executes", async () =>
   ]);
 });
 
+test("tool cwd follows the dsh session header when the agent has one", async () => {
+  const ctx = fakeCtx();
+  const impl = createDshApiImpl(ctx, { cwd: root });
+  let seen = "";
+  impl.registerTool({
+    name: "where",
+    description: "cwd",
+    parameters: { type: "object" },
+    async execute(_args, pluginCtx) {
+      seen = pluginCtx.cwd;
+      return { content: [{ type: "text", text: pluginCtx.cwd }] };
+    },
+  });
+  await ctx.tools[0].execute({}, {
+    agent: { session: { header: { cwd: "D:\\work\\app" } } },
+    signal: undefined,
+  });
+  assert.equal(seen, "D:\\work\\app");
+});
+
 test("registerCommand sanitizes the name and maps the handler to CommandResult", async () => {
   const ctx = fakeCtx();
   const impl = createDshApiImpl(ctx, { cwd: root });
@@ -197,18 +217,24 @@ test("apply() loads the shared hello-tool through the real plugin host", async (
   };
 
   // 受控开关：真实 config/plugins.json 里 hello-tool 可能被用户禁用
-  const configPath = path.join(os.tmpdir(), `pdb-dsh-plugins-${process.pid}.json`);
+  const configPath = path.join(os.tmpdir(), `mcca-dsh-plugins-${process.pid}.json`);
   fs.writeFileSync(configPath, JSON.stringify({ ds: { "hello-tool": true } }));
   try {
     adapter.apply(ctx, { cwd: root, pluginsDir, configPath });
     const def = await waitUntil(() => ctx.tools.find((d) => d.name === "hello"));
+    const memory = await waitUntil(() => ctx.tools.find((d) => d.name === "memory_write"));
+    const shot = await waitUntil(() => ctx.tools.find((d) => d.name === "computer_screenshot"));
+    const open = await waitUntil(() => ctx.tools.find((d) => d.name === "browser_open"));
+    assert.equal(memory.description.includes("功能记忆"), true);
+    assert.equal(typeof shot.execute, "function");
+    assert.equal(open.description.includes("Playwright"), false);
 
     const value = await def.execute({ name: "World" }, { signal: undefined });
     assert.equal(value.content[0].text, "你好，World！");
     assert.equal(value.details.agent, "ds");
 
     // The effect cleanup disposes the host, which unregisters the tool.
-    assert.equal(ctx.effects.includes("pdb.plugins()"), true);
+    assert.equal(ctx.effects.includes("mcca.plugins()"), true);
     const cleanup = ctx.cleanups[ctx.cleanups.length - 1];
     if (typeof cleanup === "function") await cleanup();
   } finally {

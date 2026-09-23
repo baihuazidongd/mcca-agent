@@ -8,7 +8,7 @@ import {
   createPluginHost,
   discoverPlugins,
   isEnabled,
-} from "@pi-dsh-bridge/plugin-host";
+} from "@mcca/plugin-host";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -21,7 +21,7 @@ const realConfig = path.join(root, "config", "plugins.json");
  * 目录内容解耦，只依赖这一份副本。
  */
 function stageHelloPlugin() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-plugins-stage-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-plugins-stage-"));
   fs.cpSync(path.join(pluginsDir, "hello-tool"), path.join(dir, "hello-tool"), {
     recursive: true,
   });
@@ -80,7 +80,7 @@ function recordingImpl() {
 }
 
 function tmpConfig(entries) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-plugins-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-plugins-"));
   const file = path.join(dir, "plugins.json");
   fs.writeFileSync(file, JSON.stringify(entries, null, 2));
   return { dir, file };
@@ -180,7 +180,7 @@ test("concurrent load() calls are serialized, never interleaved", async () => {
 });
 
 test("a broken plugin is isolated as state=error and does not break others", async () => {
-  const tmpPlugins = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-plugins-dir-"));
+  const tmpPlugins = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-plugins-dir-"));
   try {
     fs.mkdirSync(path.join(tmpPlugins, "good"));
     fs.writeFileSync(

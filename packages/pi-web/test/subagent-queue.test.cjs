@@ -41,14 +41,16 @@ test("history hides child forks and dock transcript stays in the queue", async (
     { type: "message", id: "u2", parentId: "n1", timestamp: "2026-09-07T07:51:01.000Z", message: { role: "user", content: [{ type: "text", text: "You are a delegated subagent.\nTask:\nReply with only the word pong.\n\n## Acceptance Contract\nHuge injected blob" }] } },
     { type: "message", id: "a1", parentId: "u2", timestamp: "2026-09-07T07:51:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "pong" }] } },
   ]);
+  // 随机端口：固定端口连续跑测试会撞上一个进程的 TIME_WAIT，偶发 ECONNRESET
+  const randPort = 3600 + Math.floor(Math.random() * 900);
   const child = spawn(process.execPath, [path.join(__dirname, "..", "server.cjs")], {
     cwd,
     env: {
       ...process.env,
-      PI_WEB_PORT: "3469",
-      PI_PORT: "3469",
-      PDB_PI_WEB_SESSIONS: sessions,
-      PDB_PI_WEB_SETTINGS: path.join(tmp, "settings.json"),
+      PI_WEB_PORT: String(randPort),
+      PI_PORT: String(randPort),
+      MCCA_PI_WEB_SESSIONS: sessions,
+      MCCA_PI_WEB_SETTINGS: path.join(tmp, "settings.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -61,6 +63,9 @@ test("history hides child forks and dock transcript stays in the queue", async (
       if (match) {
         clearTimeout(timer);
         child.stdout.off("data", onData);
+        // 继续抽空管道：子进程日志写满 stdout pipe 后会阻塞整个事件循环
+        child.stdout.resume();
+        child.stderr.resume();
         resolve(Number(match[1]));
       }
     };

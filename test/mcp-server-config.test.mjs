@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { expandEnv, mcpCacheKey } = require("@pi-dsh-bridge/pi-mcp");
+const { expandEnv, mcpCacheKey } = require("@mcca/pi-mcp");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { generateMcpPatch } = await import(
@@ -25,44 +25,44 @@ function tmpDir() {
 // command, and a substituted value is never scanned again.
 
 test("expandEnv substitutes a set variable", () => {
-  process.env.PDB_TEST_VALUE = "resolved";
+  process.env.MCCA_TEST_VALUE = "resolved";
   try {
-    assert.equal(expandEnv("${PDB_TEST_VALUE}/bin"), "resolved/bin");
+    assert.equal(expandEnv("${MCCA_TEST_VALUE}/bin"), "resolved/bin");
   } finally {
-    delete process.env.PDB_TEST_VALUE;
+    delete process.env.MCCA_TEST_VALUE;
   }
 });
 
 test("expandEnv uses the fallback when the variable is unset", () => {
-  delete process.env.PDB_TEST_UNSET;
-  assert.equal(expandEnv("${PDB_TEST_UNSET:-fallback}/bin"), "fallback/bin");
+  delete process.env.MCCA_TEST_UNSET;
+  assert.equal(expandEnv("${MCCA_TEST_UNSET:-fallback}/bin"), "fallback/bin");
 });
 
 test("expandEnv leaves an unset variable verbatim so the failure is visible", () => {
-  delete process.env.PDB_TEST_UNSET;
-  assert.equal(expandEnv("${PDB_TEST_UNSET}/bin"), "${PDB_TEST_UNSET}/bin");
+  delete process.env.MCCA_TEST_UNSET;
+  assert.equal(expandEnv("${MCCA_TEST_UNSET}/bin"), "${MCCA_TEST_UNSET}/bin");
 });
 
 test("expandEnv treats an empty variable as unset", () => {
-  process.env.PDB_TEST_EMPTY = "";
+  process.env.MCCA_TEST_EMPTY = "";
   try {
-    assert.equal(expandEnv("${PDB_TEST_EMPTY:-fallback}"), "fallback");
-    assert.equal(expandEnv("${PDB_TEST_EMPTY}"), "${PDB_TEST_EMPTY}");
+    assert.equal(expandEnv("${MCCA_TEST_EMPTY:-fallback}"), "fallback");
+    assert.equal(expandEnv("${MCCA_TEST_EMPTY}"), "${MCCA_TEST_EMPTY}");
   } finally {
-    delete process.env.PDB_TEST_EMPTY;
+    delete process.env.MCCA_TEST_EMPTY;
   }
 });
 
 test("expandEnv substitutes in a single pass", () => {
   // A resolved value that itself looks like a placeholder must survive as text,
   // otherwise an environment variable could inject further expansion.
-  process.env.PDB_TEST_OUTER = "${PDB_TEST_INNER}";
-  process.env.PDB_TEST_INNER = "leaked";
+  process.env.MCCA_TEST_OUTER = "${MCCA_TEST_INNER}";
+  process.env.MCCA_TEST_INNER = "leaked";
   try {
-    assert.equal(expandEnv("${PDB_TEST_OUTER}"), "${PDB_TEST_INNER}");
+    assert.equal(expandEnv("${MCCA_TEST_OUTER}"), "${MCCA_TEST_INNER}");
   } finally {
-    delete process.env.PDB_TEST_OUTER;
-    delete process.env.PDB_TEST_INNER;
+    delete process.env.MCCA_TEST_OUTER;
+    delete process.env.MCCA_TEST_INNER;
   }
 });
 

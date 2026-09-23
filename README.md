@@ -1,4 +1,4 @@
-# pi-dsh-bridge
+# mcca-agent
 
 Run DeepSeek Harness (dsh) and pi side by side on one plugin library, one MCP
 registry and one skills directory — without modifying either runtime.

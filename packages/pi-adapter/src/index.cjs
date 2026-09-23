@@ -1,11 +1,11 @@
 "use strict";
 
 /**
- * @pi-dsh-bridge/pi-adapter — the pi-side adapter for the neutral plugin contract.
+ * @mcca/pi-adapter — the pi-side adapter for the neutral plugin contract.
  *
  * A pi extension is a factory `(pi) => void | Promise<void>` where `pi` is
  * pi's `ExtensionAPI`. This adapter loads the shared neutral plugins through
- * `@pi-dsh-bridge/plugin-host` and maps their neutral registration calls onto pi's
+ * `@mcca/plugin-host` and maps their neutral registration calls onto pi's
  * `registerTool` / `registerCommand` / `on`.
  *
  * Hot reload does NOT need `session.reload()`. pi's own runtime API is enough:
@@ -56,6 +56,71 @@ function normalizeResult(result) {
   return out;
 }
 
+function isBackgroundTool(def) {
+  return def && (def.background === true || def.async === true);
+}
+
+function backgroundResultText(content) {
+  return (Array.isArray(content) ? content : [])
+    .map((part) => {
+      if (part && part.type === "text") return String(part.text || "");
+      if (part && part.type === "image") return "[图片结果]";
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function sendBackgroundMessage(pi, message) {
+  if (typeof pi?.sendMessage !== "function") return;
+  try {
+    Promise.resolve(pi.sendMessage(message, { triggerTurn: true })).catch(() => {});
+  } catch {
+    // The session may have been replaced while the detached tool was running.
+  }
+}
+
+/**
+ * Detach a marked tool from the current agent turn. The returned acknowledgement
+ * lets pi continue with the next tool/message; completion is injected as a custom
+ * message so the next model turn can inspect the real result.
+ */
+function runBackgroundTool(pi, def, toolCallId, params, piCtx) {
+  const taskId = `async-${Date.now().toString(36)}-${String(toolCallId || "tool").slice(-12)}`;
+  const startedAt = Date.now();
+  const detachedCtx = toPluginCtx(piCtx, { signal: undefined, background: true, taskId });
+  Promise.resolve()
+    .then(() => def.execute(params, detachedCtx))
+    .then((result) => {
+      const normalized = normalizeResult(result);
+      const summaryRaw = backgroundResultText(normalized.content) || "（工具未返回文本结果）";
+      const summary = summaryRaw.length > 12000 ? `${summaryRaw.slice(0, 11980)}\n…（结果已截断）` : summaryRaw;
+      const content = [
+        { type: "text", text: `【异步工具完成】${def.name}\n${summary}` },
+        ...(Array.isArray(normalized.content) ? normalized.content.filter((part) => part && part.type === "image") : []),
+      ];
+      sendBackgroundMessage(pi, {
+        customType: "async-tool-result",
+        content,
+        display: true,
+        details: { background: true, taskId, toolCallId, toolName: def.name, durationMs: Date.now() - startedAt },
+      });
+    })
+    .catch((error) => {
+      sendBackgroundMessage(pi, {
+        customType: "async-tool-result",
+        content: `【异步工具失败】${def.name}\n${error instanceof Error ? error.message : String(error)}`,
+        display: true,
+        details: { background: true, taskId, toolCallId, toolName: def.name, durationMs: Date.now() - startedAt, error: true },
+      });
+    });
+  return {
+    content: [{ type: "text", text: `已将工具「${def.name}」放到后台执行，完成后会通知对话。` }],
+    details: { background: true, taskId, toolCallId, toolName: def.name, startedAt },
+  };
+}
+
 /** Build the neutral `PluginCtx` pi plugins see, from a pi extension context. */
 function toPluginCtx(piCtx, extra) {
   return {
@@ -74,9 +139,9 @@ function toPluginCtx(piCtx, extra) {
  * @param {Set<string>} [options.toolNames]
  *   Collects every tool name registered by the current load; the adapter
  *   reconciles pi's active set against it.
- * @param {(cfg: import("@pi-dsh-bridge/plugin-sdk").McpServerConfig) => void} [options.onMcpServer]
- * @param {(skill: import("@pi-dsh-bridge/plugin-sdk").SkillDefinition) => void} [options.onSkill]
- * @param {(def: import("@pi-dsh-bridge/plugin-sdk").UiDefinition) => void} [options.onUi]
+ * @param {(cfg: import("@mcca/plugin-sdk").McpServerConfig) => void} [options.onMcpServer]
+ * @param {(skill: import("@mcca/plugin-sdk").SkillDefinition) => void} [options.onSkill]
+ * @param {(def: import("@mcca/plugin-sdk").UiDefinition) => void} [options.onUi]
  */
 function createPiApiImpl(pi, options = {}) {
   const { onMcpServer, onSkill, onUi, toolNames } = options;
@@ -86,12 +151,15 @@ function createPiApiImpl(pi, options = {}) {
       pi.registerTool({
         name: def.name,
         label: def.name,
-        description: def.description,
+        description: isBackgroundTool(def)
+          ? `${def.description}\n\n[异步工具] 调用后会立即返回，完成时系统会发送结果消息；不要等待本次调用，也不要重复提交同一任务。`
+          : def.description,
         // pi accepts a plain JSON Schema object for `parameters` (its own
         // bundled extensions pass one directly), so no TypeBox conversion is
         // needed.
         parameters: def.parameters ?? { type: "object", properties: {} },
         async execute(_toolCallId, params, signal, _onUpdate, piCtx) {
+          if (isBackgroundTool(def)) return runBackgroundTool(pi, def, _toolCallId, params, piCtx);
           const ctx = toPluginCtx(piCtx, { signal });
           const result = await def.execute(params, ctx);
           return normalizeResult(result);
@@ -110,9 +178,9 @@ function createPiApiImpl(pi, options = {}) {
     },
 
     registerMcpServer(cfg) {
-      // MCP servers are bridged by @pi-dsh-bridge/pi-mcp: hand the config upstream so the
+      // MCP servers are bridged by @mcca/pi-mcp: hand the config upstream so the
       // host registers the tools. Connections are process-shared and survive a
-      // session reload — @pi-dsh-bridge/pi-mcp exports closeSharedMcpClients() but no
+      // session reload — @mcca/pi-mcp exports closeSharedMcpClients() but no
       // caller wires it to session_shutdown, so a reload neither drops nor
       // reconnects them. Say so here because the opposite used to be claimed.
       if (typeof onMcpServer === "function") onMcpServer(cfg);
@@ -153,16 +221,16 @@ function createPiApiImpl(pi, options = {}) {
  * @param {string} options.pluginsDir   Shared plugins directory.
  * @param {string} options.configPath   Path to plugins.json (enable state).
  * @param {string} [options.cwd]
- * @param {(cfg: import("@pi-dsh-bridge/plugin-sdk").McpServerConfig) => void} [options.onMcpServer]
- * @param {(skill: import("@pi-dsh-bridge/plugin-sdk").SkillDefinition) => void} [options.onSkill]
- * @param {(def: import("@pi-dsh-bridge/plugin-sdk").UiDefinition) => void} [options.onUi]
+ * @param {(cfg: import("@mcca/plugin-sdk").McpServerConfig) => void} [options.onMcpServer]
+ * @param {(skill: import("@mcca/plugin-sdk").SkillDefinition) => void} [options.onSkill]
+ * @param {(def: import("@mcca/plugin-sdk").UiDefinition) => void} [options.onUi]
  * @param {(info: { loaded: Array<object>, host: object }) => void} [options.onLoaded]
  * @returns {(pi: object) => Promise<void>}
  */
 function createPiAdapter(options = {}) {
   const { pluginsDir, configPath, cwd, onMcpServer, onSkill, onUi, onLoaded } = options;
   return async function piAdapterExtension(pi) {
-    const { createPluginHost } = await import("@pi-dsh-bridge/plugin-host");
+    const { createPluginHost } = await import("@mcca/plugin-host");
     // `collected` accumulates the tool names of the load in progress; `offered`
     // snapshots the load currently in effect. registerTool writes into
     // `collected` for every plugin the host loads.
@@ -190,7 +258,7 @@ function createPiAdapter(options = {}) {
       for (const name of added) active.add(name);
       for (const name of gone) active.delete(name);
       pi.setActiveTools([...active]);
-      console.log(`[pdb.pi] tools reconciled: +${added.length} -${gone.length}, active ${active.size}`);
+      console.log(`[mcca.pi] tools reconciled: +${added.length} -${gone.length}, active ${active.size}`);
     }
 
     const impl = createPiApiImpl(pi, { onMcpServer, onSkill, onUi, toolNames: collected });
@@ -208,7 +276,7 @@ function createPiAdapter(options = {}) {
       try {
         await host.load();
       } catch (error) {
-        console.error(`[pdb.pi] reload failed: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(`[mcca.pi] reload failed: ${error instanceof Error ? error.message : String(error)}`);
         return;
       }
       reconcileActiveTools();

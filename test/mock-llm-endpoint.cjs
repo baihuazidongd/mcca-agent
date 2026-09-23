@@ -22,7 +22,7 @@ http.createServer((req, res) => {
     if (chatPhase === 0) {
       chatPhase = 1;
       const args = JSON.stringify({
-        path: "diff-test.txt",
+        path: "D:/dshpi/config/.pi-web/diff-test.txt",
         content: "hello diff\nsecond line\n",
       });
       chunks = [

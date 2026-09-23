@@ -1,9 +1,9 @@
 /**
- * @pi-dsh-bridge/session-delete — deployment extension: deletes one archived (or any
- * cold) session durably, exposed as `POST /pdb/sessions/delete`.
+ * @mcca/session-delete — deployment extension: deletes one archived (or any
+ * cold) session durably, exposed as `POST /mcca/sessions/delete`.
  *
  * The dsh wire has archive/unarchive but no session deletion; the web client's
- * archive section (pdb-patched ui-session-archive) calls this same-origin
+ * archive section (mcca-patched ui-session-archive) calls this same-origin
  * route on both backends. This module is the dsh half; pi-dsh-web's server.cjs
  * implements the identical route against pi session storage.
  *
@@ -14,18 +14,19 @@
  *   4. Detach the id from its workspace record and unarchive it — the
  *      workspace domain writes make the apiproxy host stream fan out
  *      `host/workspace-changed` and `host/archived-sessions-changed` frames.
- *   5. Emit `pdb/session-deleted` — the vendored apiproxy host stream relays
+ *   5. Emit `mcca/session-deleted` — the vendored apiproxy host stream relays
  *      it as `host/session-removed`, so clients drop the row immediately.
  *
- * Duck-typed ctx like @pi-dsh-bridge/dsh-adapter: services resolve through `ctx.get`,
- * so this module imports nothing from dsh and mounts through a `file://` row in
- * config/hot-plugins.json.
+ * Duck-typed ctx like @mcca/dsh-adapter: services resolve through `ctx.get`,
+ * so this module imports nothing from dsh and mounts through a `file://` row
+ * in config/dsh.patch.yml. Log the vendored-listener pairing in vendor/README
+ * local modifications when the vendor copy is re-synced.
  */
 
 import fs from "node:fs";
 
 /** Cordis function plugin name. */
-export const name = "pdb-session-delete";
+export const name = "mcca-session-delete";
 
 /** Services required before the delete route may mount. */
 export const inject = ["webServer"];
@@ -34,7 +35,7 @@ export const inject = ["webServer"];
 const MAX_BODY_BYTES = 4 * 1024;
 
 /**
- * Mount `POST /pdb/sessions/delete` on the host webserver.
+ * Mount `POST /mcca/sessions/delete` on the host webserver.
  * @param {object} ctx - host Context (webServer + registry/persistence services).
  */
 export function apply(ctx) {
@@ -43,7 +44,7 @@ export function apply(ctx) {
   // 占住路由的孤儿注册。
   ctx.effect(() => ctx.webServer.register({
     kind: "exact",
-    path: "/pdb/sessions/delete",
+    path: "/mcca/sessions/delete",
     handler: async (req, res) => {
       if (req.method !== "POST") {
         res.writeHead(405);
@@ -71,7 +72,7 @@ export function apply(ctx) {
         });
       }
     },
-  }), "pdb-session-delete: route");
+  }), "mcca-session-delete: route");
 }
 
 /**
@@ -110,7 +111,7 @@ async function deleteSession(ctx, persistence, registry, sessionId, res) {
   if (location?.path && fs.existsSync(location.path)) {
     await fs.promises.rm(location.path, { recursive: true, force: true });
   }
-  ctx.emit?.("pdb/session-deleted", { sessionId: meta.id });
+  ctx.emit?.("mcca/session-deleted", { sessionId: meta.id });
   json(res, 200, { ok: true, deleted: true });
 }
 

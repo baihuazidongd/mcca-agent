@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createPiAdapter } = require("@pi-dsh-bridge/pi-adapter");
+const { createPiAdapter } = require("@mcca/pi-adapter");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -41,7 +41,7 @@ function writePlugin(pluginsDir, manifest, indexSource) {
 
 /** 与共享 plugins/ 目录解耦：把 hello-tool 副本放进临时插件目录再交给 adapter */
 function stageHelloPlugin() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-pi-adapter-stage-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-pi-adapter-stage-"));
   fs.cpSync(path.join(pluginsDir, "hello-tool"), path.join(dir, "hello-tool"), {
     recursive: true,
   });
@@ -87,8 +87,48 @@ test("maps hello-tool onto pi.registerTool with a 5-arg execute", async () => {
   }
 });
 
+test("detaches background tools and sends their result back as a custom turn", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-pi-adapter-background-"));
+  let pi;
+  try {
+    writePlugin(
+      dir,
+      { name: "background", version: "1.0.0", kind: "tool" },
+      `export default (api) => {
+        api.registerTool({
+          name: "slow",
+          description: "slow background tool",
+          background: true,
+          parameters: {},
+          async execute(args, ctx) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return { content: [{ type: "text", text: "done" }], details: { detached: ctx.background === true } };
+          },
+        });
+      };`,
+    );
+    pi = recordingPi();
+    pi.messages = [];
+    pi.sendMessage = (message, options) => pi.messages.push({ message, options });
+    const factory = createPiAdapter({ pluginsDir: dir, configPath: realConfig, cwd: root });
+    await factory(pi);
+
+    const immediate = await pi.tools[0].execute("call-bg", {}, undefined, undefined, { cwd: root });
+    assert.equal(immediate.details.background, true);
+    assert.equal(pi.messages.length, 0, "completion must be deferred");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(pi.messages.length, 1);
+    assert.equal(pi.messages[0].message.customType, "async-tool-result");
+    assert.equal(pi.messages[0].options.triggerTurn, true);
+    assert.match(pi.messages[0].message.content[0].text, /done/);
+  } finally {
+    await shutdownAdapter(pi);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("maps registerCommand to pi.registerCommand with a string-arg handler", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-pi-adapter-cmd-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-pi-adapter-cmd-"));
   let pi;
   try {
     writePlugin(
@@ -119,7 +159,7 @@ test("maps registerCommand to pi.registerCommand with a string-arg handler", asy
 });
 
 test("maps neutral events onto pi events and rewrites the type field", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-pi-adapter-on-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-pi-adapter-on-"));
   let pi;
   try {
     writePlugin(

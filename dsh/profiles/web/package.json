@@ -1,7 +1,7 @@
 {
   "name": "pdb-profile-web",
   "private": true,
-  "description": "dsh 'web' profile for pi-dsh-bridge. The profile owns the plugins the bridge mounts into dsh; bundles are the upstream boot graph.",
+  "description": "dsh 'web' profile for mcca-agent. The profile owns the plugins the bridge mounts into dsh; bundles are the upstream boot graph.",
   "dependencies": {
     "@deepseek-ai/dsh-mcp-client": "^0.0.1-rc.1",
     "@deepseek-ai/dsh-skill-filesystem": "^0.0.1-rc.3"

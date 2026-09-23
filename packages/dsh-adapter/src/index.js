@@ -1,29 +1,30 @@
 ﻿/**
- * @pi-dsh-bridge/dsh-adapter -- the dsh-side adapter for the neutral plugin contract.
+ * @mcca/dsh-adapter 鈥?the dsh-side adapter for the neutral plugin contract.
  *
  * A Cordis function plugin (`name` / `inject` / `apply`) that loads the shared
- * neutral plugins through `@pi-dsh-bridge/plugin-host` and maps their registration
+ * neutral plugins through `@mcca/plugin-host` and maps their registration
  * calls onto dsh:
  *
- *   registerTool      -> ctx.tools.register(raw JSON-Schema ToolDefinition)
- *                        (the same entry MCP-sourced tools use; execute returns
- *                        one canonical JSON value, output.render projects the
- *                        neutral content blocks to model-facing text)
- *   registerCommand   -> ctx.commands.register({ name, description, handler })
- *   on(...)           -> ctx.on('agent/created' | 'agent/disposed' |
- *                               'session/event')
- *   registerMcpServer -> NOT mounted here: dsh's official per-server plugin is
- *                        `@deepseek-ai/dsh-mcp-client`; declare servers in the
- *                        shared config/mcp.json and mount them through the
- *                        generated config/dsh-mcp.patch.yml rows instead.
- *   registerSkill     -> files, not runtime objects: the shared skills/ dir is
- *                        wired via skill-filesystem `customSkillDirs` in the
- *                        web profile's cordis patch layer.
- *   registerUi        -> no-op under dsh: the dsh UI renders its own native
- *                        client-bundle rows; the old shared-UI registry
- *                        (GET /pdb/ui-plugins) had no consumer and is gone.
+ *   registerTool      鈫?ctx.tools.register(raw JSON-Schema ToolDefinition)
+ *                       (the same entry MCP-sourced tools use; execute returns
+ *                       one canonical JSON value, output.render projects the
+ *                       neutral content blocks to model-facing text)
+ *   registerCommand   鈫?ctx.commands.register({ name, description, handler })
+ *   on(...)           鈫?ctx.on('agent/created' | 'agent/disposed' |
+ *                              'session/event')
+ *   registerMcpServer 鈫?NOT mounted here: dsh's official per-server plugin is
+ *                       `@deepseek-ai/dsh-mcp-client`; declare servers in the
+ *                       shared config/mcp.json and mount them through the
+ *                       generated config/dsh-mcp.patch.yml rows instead.
+ *   registerSkill     鈫?files, not runtime objects: the shared skills/ dir is
+ *                       wired via skill-filesystem `customSkillDirs` in
+ *                       config/dsh.patch.yml.
+ *   registerUi        鈫?no-op under dsh: the dsh UI renders its own native
+ *                       client-bundle rows (ui-message-jump, content-preview
+ *                       in config/dsh.patch.yml); the old shared-UI registry
+ *                       (GET /mcca/ui-plugins) had no consumer and is gone.
  *
- * The module deliberately imports nothing from dsh -- `ctx` is duck-typed -- so
+ * The module deliberately imports nothing from dsh 鈥?`ctx` is duck-typed 鈥?so
  * the adapter has zero peer-dependency resolution constraints and can sit in
  * any repo. Hot reload does NOT rely on dsh HMR: the plugin host watches the
  * shared plugins dir + enable config itself and re-runs load (disposing old
@@ -33,13 +34,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPluginHost, discoverPlugins, readEnableConfig } from "@pi-dsh-bridge/plugin-host";
+import { createPluginHost, discoverPlugins, readEnableConfig } from "@mcca/plugin-host";
 
 /** Repo root (this file is packages/dsh-adapter/src/index.js). */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 /** Cordis function-plugin name. */
-export const name = "pdb-dsh-adapter";
+export const name = "mcca-dsh-adapter";
 
 /** Services required before the shared plugins may register. */
 export const inject = ["tools", "commands"];
@@ -81,13 +82,20 @@ export const EVENT_MAP = {
   turn_end: { kind: "session", type: "turn/end" },
 };
 
+/** Session cwd when dsh put one on the agent; otherwise the adapter fallback. */
+export function sessionCwd(exec, fallback) {
+  const fromHeader = exec?.agent?.session?.header?.cwd;
+  if (typeof fromHeader === "string" && fromHeader.trim()) return fromHeader;
+  return fallback;
+}
+
 /**
  * Build the native PluginApiImpl that maps neutral registration onto a dsh
  * Context. Exported for tests; `apply` wires it to the real ctx.
  */
 export function createDshApiImpl(ctx, options = {}) {
   const cwd = options.cwd ?? process.cwd();
-  const pluginCtx = (signal) => ({ cwd, agent: "ds", signal });
+  const pluginCtx = (exec) => ({ cwd: sessionCwd(exec, cwd), agent: "ds", signal: exec?.signal });
 
   return {
     registerTool(def) {
@@ -101,7 +109,7 @@ export function createDshApiImpl(ctx, options = {}) {
           render: renderNeutral,
         },
         async execute(args, exec) {
-          const result = await def.execute(args, pluginCtx(exec?.signal));
+          const result = await def.execute(args, pluginCtx(exec));
           return normalizeResult(result);
         },
       });
@@ -113,7 +121,7 @@ export function createDshApiImpl(ctx, options = {}) {
         name: commandName,
         description: def.description || `command ${commandName}`,
         async handler(invocation) {
-          const out = await def.handler(invocation.rawInput, pluginCtx(invocation.signal));
+          const out = await def.handler(invocation.rawInput, pluginCtx(invocation));
           return typeof out === "string" ? { kind: "success", text: out } : { kind: "success" };
         },
       });
@@ -121,25 +129,25 @@ export function createDshApiImpl(ctx, options = {}) {
 
     registerMcpServer(cfg) {
       console.warn(
-        `[pdb] registerMcpServer(${cfg?.serverName}) is a no-op under dsh: ` +
-          `declare the server in config/mcp.json -- it is mounted through the ` +
+        `[mcca] registerMcpServer(${cfg?.serverName}) is a no-op under dsh: ` +
+          `declare the server in config/mcp.json 鈥?it is mounted through the ` +
           `official @deepseek-ai/dsh-mcp-client rows in config/dsh-mcp.patch.yml.`,
       );
     },
 
     registerSkill() {
       console.warn(
-        "[pdb] registerSkill() is a no-op under dsh: put SKILL.md bundles in " +
+        "[mcca] registerSkill() is a no-op under dsh: put SKILL.md bundles in " +
           "the shared skills/ dir (wired via skill-filesystem customSkillDirs).",
       );
     },
 
     // UI-kind shared plugins: nothing consumes a dsh-side UI registry
-    // (the old /pdb/ui-plugins routes are gone), so the registration is a
+    // (the old /mcca/ui-plugins routes are gone), so the registration is a
     // no-op that still returns a disposer to honor the contract.
     registerUi() {
       console.warn(
-        "[pdb] registerUi() is a no-op under dsh: the shared-UI mount surface " +
+        "[mcca] registerUi() is a no-op under dsh: the shared-UI mount surface " +
           "had no consumer and was removed; dsh UIs are native client-bundles.",
       );
       return () => {};
@@ -171,7 +179,7 @@ export function createDshApiImpl(ctx, options = {}) {
  *
  * @param {object} ctx - dsh Context (duck-typed: tools/commands/on/effect).
  * @param {{ pluginsDir?: string, configPath?: string, cwd?: string }} [config]
- *   Row config from the patch file. Defaults point at the pdb repo root.
+ *   Row config from the patch file. Defaults point at the mcca repo root.
  */
 export function apply(ctx, config) {
   const root = config?.cwd ?? ROOT;
@@ -180,19 +188,26 @@ export function apply(ctx, config) {
 
   const impl = createDshApiImpl(ctx, { cwd: root });
   const host = createPluginHost({ agent: "ds", pluginsDir, configPath, impl });
+  // Built-in IDE tools (memory, computer) live in the package so they are not
+  // lost with the gitignored local plugins/ tree.
+  const ideDir = path.join(ROOT, "packages", "agent-ide", "plugins");
+  const ideHost = createPluginHost({ agent: "ds", pluginsDir: ideDir, configPath, impl });
 
   ctx.effect(() => {
     let stopped = false;
     const load = () => {
       if (stopped) return;
       void host.load();
+      void ideHost.load();
     };
     load();
     const stopWatch = host.watch(() => load());
+    const stopIde = ideHost.watch(() => load());
     return () => {
       stopped = true;
       stopWatch();
-      return host.disposeAll();
+      stopIde();
+      return Promise.all([host.disposeAll(), ideHost.disposeAll()]);
     };
-  }, "pdb.plugins()");
+  }, "mcca.plugins()");
 }

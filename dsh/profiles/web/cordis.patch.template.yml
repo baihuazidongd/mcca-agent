@@ -1,4 +1,4 @@
-# dsh 'web' profile overlay for pi-dsh-bridge.
+# dsh 'web' profile overlay for mcca-agent.
 #
 # This file is materialised by `pnpm run setup` (see scripts/bootstrap.mjs) into
 # the dsh home as profiles/web/cordis.patch.yml, with the checkout-root

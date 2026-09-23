@@ -12,7 +12,7 @@ const {
   readMcpServers,
   normalizeMcpToolResult,
   closeSharedMcpClients,
-} = require("@pi-dsh-bridge/pi-mcp");
+} = require("@mcca/pi-mcp");
 
 // A tiny MCP stdio server speaking newline-delimited JSON-RPC over stdin/stdout.
 const SERVER = `
@@ -43,6 +43,10 @@ test("stdio MCP client lists tools and calls one", async () => {
   assert.equal(tools[0].name, "echo");
   const raw = await client.callTool("echo", { text: "hi" });
   assert.deepEqual(normalizeMcpToolResult(raw), { content: [{ type: "text", text: "echo:hi" }] });
+  assert.deepEqual(
+    normalizeMcpToolResult({ content: [{ type: "image", data: "aGk=", mimeType: "image/png" }] }),
+    { content: [{ type: "image", data: "aGk=", mimeType: "image/png" }] },
+  );
   client.close();
 });
 
@@ -69,6 +73,26 @@ test("registers mcp__demo__echo as a pi tool; shared client survives sessions", 
 
   // Shared clients deliberately outlive sessions (cheap reloads); tests tear
   // them down explicitly.
+  await closeSharedMcpClients();
+});
+
+test("marks configured MCP tools as background and reports completion", async () => {
+  const messages = [];
+  const pi = {
+    tools: [],
+    registerTool(def) { pi.tools.push(def); },
+    sendMessage(message, options) { messages.push({ message, options }); },
+  };
+  const factory = createPiMcpExtension({ servers: [{ ...STDIO, backgroundTools: ["echo"] }] });
+  await factory(pi);
+  const tool = pi.tools[0];
+  assert.match(tool.description, /异步工具/);
+  const immediate = await tool.execute("mcp-bg", { text: "later" }, undefined, undefined, { cwd: process.cwd() });
+  assert.equal(immediate.details.background, true);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].message.customType, "async-tool-result");
+  assert.equal(messages[0].options.triggerTurn, true);
   await closeSharedMcpClients();
 });
 
@@ -108,7 +132,7 @@ test("HTTP (Streamable HTTP) transport lists and calls tools", async () => {
 });
 
 test("readMcpServers accepts a bare array or a { servers } object", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdb-mcp-config-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcca-mcp-config-"));
   try {
     const arrayFile = path.join(dir, "array.json");
     fs.writeFileSync(arrayFile, JSON.stringify([{ serverName: "a" }, { serverName: "b" }]));

@@ -1,8 +1,8 @@
 {
-  "name": "pi-dsh-bridge",
-  "version": "0.5.0",
+  "name": "mcca-agent",
+  "version": "0.1.0",
   "private": true,
-  "description": "Run DeepSeek Harness (dsh) and pi side by side on one plugin library, one MCP registry and one skills directory, without modifying either runtime.",
+  "description": "Run DeepSeek Harness (dsh), pi and the terminal CLIs side by side on one plugin library, one MCP registry and one skills directory, without modifying either runtime.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.9.0",
@@ -14,19 +14,16 @@
     "start": "node scripts/start.mjs",
     "portal": "node packages/portal/server.cjs",
     "pi-web": "node packages/pi-web/server.cjs",
-    "build": "pnpm --filter @pi-dsh-bridge/plugin-sdk build && pnpm --filter @pi-dsh-bridge/plugin-host build",
+    "build": "pnpm --filter @mcca/plugin-sdk build && pnpm --filter @mcca/plugin-host build",
     "test": "node --test \"test/**/*.test.mjs\"",
     "test:pi-web": "node --test \"packages/pi-web/test/**/*.test.cjs\""
   },
-  "dependencies": {
-    "@deepseek-ai/dsh": "^0.1.5-rc.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1"
-  },
   "devDependencies": {
-    "@pi-dsh-bridge/dsh-adapter": "workspace:^",
-    "@pi-dsh-bridge/pi-adapter": "workspace:^",
-    "@pi-dsh-bridge/pi-mcp": "workspace:^",
-    "@pi-dsh-bridge/plugin-host": "workspace:^",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@mcca/dsh-adapter": "workspace:^",
+    "@mcca/pi-adapter": "workspace:^",
+    "@mcca/pi-mcp": "workspace:^",
+    "@mcca/plugin-host": "workspace:^",
     "typescript": "^5.9.0"
   }
 }

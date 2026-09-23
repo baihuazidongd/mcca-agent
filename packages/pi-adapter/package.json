@@ -1,5 +1,5 @@
 {
-  "name": "@pi-dsh-bridge/pi-adapter",
+  "name": "@mcca/pi-adapter",
   "version": "0.1.0",
   "description": "pi extension adapter: maps the neutral plugin contract onto pi's registerTool/registerCommand/on",
   "main": "./src/index.cjs",
@@ -9,7 +9,7 @@
   },
   "files": ["src"],
   "dependencies": {
-    "@pi-dsh-bridge/plugin-host": "workspace:^",
-    "@pi-dsh-bridge/plugin-sdk": "workspace:^"
+    "@mcca/plugin-host": "workspace:^",
+    "@mcca/plugin-sdk": "workspace:^"
   }
 }

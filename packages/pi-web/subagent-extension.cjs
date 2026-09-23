@@ -142,12 +142,16 @@ function requestRpc(bus, method, params = {}, timeoutMs = 5000) {
   });
 }
 
-function createObserver(registry, onBus, onConfig) {
+function createObserver(registry, onBus, onConfig, onEvent) {
   return (pi) => {
     if (onBus) onBus(pi.events);
     const names = ["subagent:async-started", "subagent:async-complete", "subagent:foreground-complete", "subagent:process-terminal"];
     const unsubscribers = names.map((name) => pi.events.on(name, (event) => {
       try { registry.event(name, event); } catch (error) { registry.lastError = error.message; }
+      // 宿主侧旁路：pi-subagents 自己的完成通知在网页宿主里会被静默丢掉
+      // （intercom 认领 / 身份不匹配都直接 return），所以 bridge 拿同一批事件
+      // 自己给父会话补回执。回执失败绝不能影响注册表。
+      try { if (onEvent) onEvent(name, event); } catch { /* 旁路 */ }
     }));
     const offTool = typeof pi.on === "function" ? pi.on("tool_result", (event) => {
       if (event && event.toolName === "subagent" && event.details && event.details.mode === "management" && onConfig) onConfig();

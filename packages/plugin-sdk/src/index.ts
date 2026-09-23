@@ -1,5 +1,5 @@
 /**
- * @pi-dsh-bridge/plugin-sdk — the neutral plugin contract.
+ * @mcca/plugin-sdk — the neutral plugin contract.
  *
  * This is the ONLY package a shared plugin author depends on. It is a small,
  * stable surface that both runtimes (DeepSeek Harness and pi) adapt to, so a
@@ -25,7 +25,7 @@ export interface UiDefinition {
    * name; hosts serve the entry module from `/ui-plugins/<name>/<entry>`.
    */
   name: string;
-  /** Human title (display language free — the pdb library uses Chinese). */
+  /** Human title (display language free — the mcca library uses Chinese). */
   title: string;
   /** One-line explanation of what the extension does. */
   description?: string;
@@ -69,6 +69,13 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parameters: JsonSchema;
+  /**
+   * Run outside the agent turn. The tool returns an immediate acknowledgement;
+   * the host sends the eventual result back as a new custom message/turn.
+   */
+  background?: boolean;
+  /** Alias for background, useful when mirroring an async API. */
+  async?: boolean;
   execute(args: unknown, ctx: PluginCtx): Promise<ToolResult>;
 }
 
@@ -80,6 +87,10 @@ export interface CommandDefinition {
 export interface McpServerConfig {
   serverName: string;
   transport: "stdio" | "sse";
+  /** Mark all tools from this server as detached background tools. */
+  backgroundTools?: boolean | string[];
+  /** Alias for backgroundTools. */
+  asyncTools?: boolean | string[];
   /** stdio transport. */
   command?: string;
   args?: string[];

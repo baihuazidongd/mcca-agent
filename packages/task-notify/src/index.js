@@ -1,5 +1,5 @@
 /**
- * @pi-dsh-bridge/task-notify — 任务终态通知（dsh 侧）。
+ * @mcca/task-notify — 任务终态通知（dsh 侧）。
  *
  * 监听 goal 域的 `goal/changed`（durable 变更提交后的实时通知），在目标进入
  * 终态时把事件推给本机 portal（`POST /api/notify`），由 portal 前端经 Tauri
@@ -11,12 +11,12 @@
  * 尽力而为：portal 未运行 / 不可达时静默丢弃；监听器抛错由 cordis 隔离，
  * 绝不影响目标本身。错误通知按 agent 节流，避免重试风暴刷屏。
  *
- * 挂载：`config/hot-plugins.json` 清单（由 pdb-hot-mount 运行期挂载），
+ * 挂载：`config/hot-plugins.json` 清单（由 mcca-hot-mount 运行期挂载），
  * 所以改这个文件本身就会热重挂，不需要重启宿主。
  */
 
 /** Cordis function plugin name. */
-export const name = "pdb-task-notify";
+export const name = "mcca-task-notify";
 
 /** Services required before the listeners may mount. */
 export const inject = [];
@@ -29,6 +29,9 @@ function notifyEndpoint() {
 
 /**
  * 推一条系统通知到 portal；任何失败都吞掉（通知是旁路，不是业务）。
+ *
+ * `kind: "auto"` 是关键：portal 前端只把它当系统通知弹，不放进「事件板」——
+ * 事件板只放用户在会话里明确要求推的人工条目。
  * @param {string} title - 通知标题。
  * @param {string} body - 通知正文。
  */
@@ -38,7 +41,7 @@ function notifyPortal(title, body) {
   fetch(notifyEndpoint(), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title, body, source: "dsh" }),
+    body: JSON.stringify({ title, body, kind: "auto", source: "dsh" }),
     signal: controller ? controller.signal : undefined,
   })
     .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); })
@@ -98,7 +101,7 @@ export function apply(ctx) {
     }
     const reason = goal?.blockedReason?.message ? brief(goal.blockedReason.message, 120) : "目标已受阻";
     notifyPortal("dsh 任务失败 ✗", objective ? `${objective}：${reason}` : reason);
-  }), "pdb-task-notify: goal terminal states");
+  }), "mcca-task-notify: goal terminal states");
 
   ctx.effect(() => ctx.on("agent/error", ({ agent, error }) => {
     const id = String(agent?.id ?? agent?.session?.id ?? "unknown");
@@ -110,7 +113,7 @@ export function apply(ctx) {
       announce(id, message);
     }, ERROR_GRACE_MS);
     pending.set(id, { message, timer });
-  }), "pdb-task-notify: agent errors");
+  }), "mcca-task-notify: agent errors");
 
   ctx.effect(() => ctx.on("agent/status", ({ agent, status }) => {
     const id = String(agent?.id ?? agent?.session?.id ?? "unknown");
@@ -126,12 +129,12 @@ export function apply(ctx) {
     clearTimeout(record.timer);
     pending.delete(id);
     announce(id, record.message);
-  }), "pdb-task-notify: recover detection");
+  }), "mcca-task-notify: recover detection");
 
   // 卸载时收掉未决的观察定时器。注册与清理都必须是 effect：apply 的返回值
   // 被 cordis 忽略，返回 disposer 不会随 fiber 卸载。
   ctx.effect(() => () => {
     for (const record of pending.values()) clearTimeout(record.timer);
     pending.clear();
-  }, "pdb-task-notify: pending timers");
+  }, "mcca-task-notify: pending timers");
 }

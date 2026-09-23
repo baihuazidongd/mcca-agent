@@ -1,4 +1,4 @@
-# pi-dsh-bridge
+# mcca-agent
 
 让 DeepSeek Harness（dsh）与 pi 并排跑在**同一套插件库、同一份 MCP 注册表、同一个
 技能目录**上——不改动任何一个运行时的源码。

@@ -1,5 +1,5 @@
 {
-  "name": "@pi-dsh-bridge/plugin-host",
+  "name": "@mcca/plugin-host",
   "version": "0.1.0",
   "description": "Shared plugin library loader: discovery, per-agent enable/disable, hot reload",
   "type": "module",
@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@pi-dsh-bridge/plugin-sdk": "workspace:^"
+    "@mcca/plugin-sdk": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

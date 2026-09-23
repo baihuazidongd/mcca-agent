@@ -1,5 +1,5 @@
 /**
- * @pi-dsh-bridge/plugin-host — shared plugin library loader.
+ * @mcca/plugin-host — shared plugin library loader.
  *
  * Scans the shared plugins directory, filters by agent target and enable
  * state, loads each plugin entry through a native `PluginApiImpl`, and tracks
@@ -19,7 +19,7 @@ import {
   type PluginFactory,
   type PluginManifest,
   type PluginTarget,
-} from "@pi-dsh-bridge/plugin-sdk";
+} from "@mcca/plugin-sdk";
 
 const MANIFEST_FILES = ["manifest.json", "plugin.json"] as const;
 
@@ -281,7 +281,7 @@ export function createPluginHost(options: PluginHostOptions): PluginHost {
     };
     const attach = (watcher: fs.FSWatcher) => {
       watcher.on("error", (error: NodeJS.ErrnoException) => {
-        console.warn(`[pdb.host] plugin watcher failed (${error?.code ?? "unknown"}); falling back to polling`);
+        console.warn(`[mcca.host] plugin watcher failed (${error?.code ?? "unknown"}); falling back to polling`);
         const at = watchers.indexOf(watcher);
         if (at >= 0) watchers.splice(at, 1);
         try {

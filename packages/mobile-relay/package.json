@@ -1,0 +1,13 @@
+{
+  "name": "@mcca/mobile-relay",
+  "version": "0.1.0",
+  "description": "Public relay: pairs the desktop mobile-bridge with phones when they are not on the same LAN",
+  "main": "./server.cjs",
+  "private": true,
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

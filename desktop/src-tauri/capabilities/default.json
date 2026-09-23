@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for the pdb shell",
+  "description": "Default capabilities for the mcca shell",
   "windows": ["main"],
   "remote": {
     "urls": ["http://127.0.0.1:3470", "http://127.0.0.1:3470/*"]

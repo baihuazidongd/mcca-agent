@@ -1,0 +1,12 @@
+# mcca overlay for dsh — 已清空（保留文件因 portal 仍以 --patch 传它）。
+#
+# 全部挂载行已迁到 profile 的受监听层
+# `config/dsh-home/profiles/web/cordis.patch.yml`：那一层被 app-boot 的
+# watchUserPatches 实时监听，改文件即热重组 loader 树；而 --patch 覆盖层只在
+# 启动时读一次，把行放在这里就等于“改插件必须重启宿主”。
+#
+# 宿主插件集本身再由运行期清单决定：`config/hot-plugins.json`
+# （监管器 = packages/hot-mount，状态见 GET /mcca/hot-plugins）。
+#
+# 结论：新增 / 修改 / 删除 mcca 插件不再需要重启 dsh 或 pi。
+[]
