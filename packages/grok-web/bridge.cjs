@@ -8,7 +8,7 @@ const { spawn } = require("node:child_process");
 const piProviders = require("../pi-web/pi-providers.cjs");
 
 const STATE_FILE = process.env.MCCA_GROK_STATE
-  || path.join(__dirname, "..", "..", "config", ".grok-web", "state.json");
+  || path.join(require("../runtime-core/paths.cjs").createPaths().data, ".grok-web", "state.json");
 
 function grokHome() {
   return process.env.GROK_HOME || path.join(process.env.USERPROFILE || os.homedir(), ".grok");
@@ -463,7 +463,7 @@ class GrokBridge {
     const model = this.cliModel(provider, modelId);
     const proc = this.spawn(model, cwd, env);
     await this.request(proc, "initialize", { protocolVersion: 1, clientCapabilities: {} });
-    const created = await this.request(proc, "session/new", { cwd, mcpServers: [] });
+    const created = await this.request(proc, "session/new", { cwd, mcpServers: [require("../runtime-core/mcp-config.cjs").acpMcp()] });
     const id = created.sessionId;
     if (!id) {
       this.kill(proc);
@@ -485,7 +485,7 @@ class GrokBridge {
     const proc = this.spawn(this.cliModel(model.provider, model.modelId), cwd, env);
     this.procs.set(id, proc);
     await this.request(proc, "initialize", { protocolVersion: 1, clientCapabilities: {} });
-    await this.request(proc, "session/load", { sessionId: id, cwd, mcpServers: [] });
+    await this.request(proc, "session/load", { sessionId: id, cwd, mcpServers: [require("../runtime-core/mcp-config.cjs").acpMcp()] });
     return proc;
   }
 

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "runtimes": [
+    {
+      "id": "dsh", "label": "dsh", "page": "dsh", "group": "ide", "defaultInstalled": true,
+      "capabilities": ["tools", "skills", "mcp", "customization", "tasks"], "taskProtocol": "dsh-rpc-v1",
+      "port": 3081, "portEnv": ["DSH_PORT"], "command": "pnpm", "commandEnv": "DSH_CMD", "argsEnv": "DSH_ARGS",
+      "args": ["dsh", "--profile", "web", "--patch", "${DSH_PATCH}", "--patch", "${DSH_MCP_PATCH}", "--port", "${PORT}"],
+      "cwd": "${APP}/vendor/dsh", "cwdEnv": "DSH_CWD", "env": {"DSH_HOME": "${DSH_HOME}"}, "windowsShell": true,
+      "reclaim": {"signature": "apps/cli/src/bin.ts", "requirePort": true}
+    },
+    {
+      "id": "pi-web", "label": "pi", "page": "pi", "group": "ide", "defaultInstalled": true,
+      "capabilities": ["tools", "skills", "mcp", "customization", "tasks"], "taskProtocol": "sessions-v1",
+      "port": 3458, "portEnv": ["PI_PORT"], "command": "${NODE}", "commandEnv": "PI_WEB_CMD", "argsEnv": "PI_WEB_ARGS",
+      "args": ["packages/pi-web/server.cjs"], "cwd": "${APP}", "env": {"PI_WEB_PORT": "${PORT}"},
+      "liveness": {"path": "/api/models", "timeoutMs": 12000}, "reclaim": {"signature": "server.cjs", "requirePort": false}
+    },
+    {
+      "id": "codex-web", "label": "Codex", "page": "codex", "group": "cli", "defaultInstalled": true, "terminal": true,
+      "capabilities": ["tasks"], "taskProtocol": "sessions-v1",
+      "port": 3463, "portEnv": ["CODEX_WEB_PORT"], "command": "${NODE}", "commandEnv": "CODEX_WEB_CMD", "argsEnv": "CODEX_WEB_ARGS",
+      "args": ["packages/mini-web/server.cjs", "--tool=codex"], "cwd": "${APP}", "env": {"MCCA_MINI_PORT": "${PORT}"},
+      "reclaim": {"signature": "--tool=codex", "requirePort": false},
+      "artifacts": {
+        "win32-x64": {"version": "0.157.0", "url": "https://github.com/openai/codex/releases/download/rust-v0.157.0/codex-x86_64-pc-windows-msvc.exe", "sha256": "ed1c7b36e44536809c868864c833af8a857f56599a7a7fe23b908a1ba1093b1f", "format": "file", "filename": "codex.exe"},
+        "win32-arm64": {"version": "0.157.0", "url": "https://github.com/openai/codex/releases/download/rust-v0.157.0/codex-aarch64-pc-windows-msvc.exe", "sha256": "0f5d8893ed559dbf3ff082d84df71e3bf90bdd19261fc3c257acfdc8847ce342", "format": "file", "filename": "codex.exe"}
+      }
+    },
+    {
+      "id": "openhands-web", "label": "OpenHands", "page": "openhands", "group": "cli", "defaultInstalled": true, "terminal": true,
+      "capabilities": ["tasks"], "taskProtocol": "openhands-acp-v1", "port": 3460, "portEnv": ["OH_WEB_PORT", "OPENHANDS_PORT"], "resolver": "openhandsWeb",
+      "command": "", "args": [], "cwd": "${APP}", "reclaim": {"signature": "openhands", "requirePort": true}
+    },
+    {
+      "id": "grok-web", "label": "Grok Build", "page": "grok", "group": "cli", "defaultInstalled": true, "terminal": true,
+      "capabilities": ["tasks"], "taskProtocol": "sessions-v1",
+      "port": 3461, "portEnv": ["GROK_WEB_PORT", "GROK_PORT"], "command": "${NODE}", "commandEnv": "GROK_WEB_CMD", "argsEnv": "GROK_WEB_ARGS",
+      "args": ["packages/mini-web/server.cjs", "--tool=grok"], "cwd": "${APP}", "env": {"MCCA_MINI_PORT": "${PORT}"},
+      "reclaim": {"signature": "--tool=grok", "requirePort": false}
+    },
+    {
+      "id": "hermes-web", "label": "Hermes Agent", "page": "hermes", "group": "cli", "defaultInstalled": true, "terminal": true,
+      "capabilities": ["assistant"], "port": 3000, "portEnv": ["MCCA_HERMES_UI_PORT", "HERMES_UI_PORT"],
+      "command": "${NODE}", "args": ["server-entry.js"], "cwd": "${APP}/vendor/hermes-workspace", "resolver": "hermesWorkspace",
+      "requires": ["hermes-dashboard"], "reclaim": {"signature": "server-entry.js", "requirePort": false}
+    },
+    {
+      "id": "hermes-dashboard", "label": "hermes-dashboard", "group": "cli", "defaultInstalled": true,
+      "capabilities": [], "port": 3462, "portEnv": ["MCCA_HERMES_PORT", "HERMES_PORT"], "resolver": "hermesDashboard",
+      "command": "", "args": [], "cwd": "${APP}", "reclaim": {"signature": "hermes", "requirePort": false}
+    },
+    {
+      "id": "canvas", "label": "canvas", "page": "canvas", "group": "extension", "defaultInstalled": true,
+      "capabilities": [], "port": 8188, "portEnv": ["CANVAS_PORT"], "command": "D:/ComfyUI/venv/Scripts/python.exe", "commandEnv": "CANVAS_CMD",
+      "args": ["main.py", "--directml", "--listen", "0.0.0.0", "--port", "${PORT}"], "argsEnv": "CANVAS_ARGS",
+      "cwd": "D:/ComfyUI", "cwdEnv": "CANVAS_CWD", "reclaim": {"signature": "main.py", "requirePort": true}
+    },
+    {
+      "id": "mobile", "label": "mobile", "group": "extension", "defaultInstalled": true, "capabilities": [],
+      "port": 3471, "portEnv": ["MCCA_MOBILE_PORT"], "command": "${NODE}", "commandEnv": "MCCA_MOBILE_CMD", "argsEnv": "MCCA_MOBILE_ARGS",
+      "args": ["packages/mobile-bridge/server.cjs"], "cwd": "${APP}", "env": {"MCCA_MOBILE_PORT": "${PORT}"},
+      "reclaim": {"signature": "mobile-bridge", "requirePort": false}
+    }
+  ]
+}

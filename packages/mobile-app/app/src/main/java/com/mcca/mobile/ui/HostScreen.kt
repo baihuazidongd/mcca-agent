@@ -29,7 +29,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +52,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun HostScreen() {
     var tick by remember { mutableStateOf(0L) }
-    LaunchedEffect(Unit) {
+    whilePolling {
         Store.refreshHost()
         while (true) {
             delay(5000)

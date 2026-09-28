@@ -207,6 +207,41 @@ function helloPayload() {
   };
 }
 
+// ── 子代理快照（tasks.list 用）────────────────────────────────────
+//
+// 一次 tasks.list 原来要对最多 20 个会话**串行**发 20 个 HTTP：实测单次
+// 681–1153ms、烧掉 0.9–1.25 CPU 秒，而手机停在任务页时每 5s 就打一次 —— 两成
+// 单核就这么没了。改成并发取，外加 3s 内的快照复用（轮询周期 5s，不会看到旧状态）。
+const SUBAGENT_TTL = Number(process.env.MCCA_SUBAGENT_TTL || 3000);
+const subagentCache = new Map(); // sessionId -> { at, runs }
+
+async function subagentSnapshots(ids) {
+  const now = Date.now();
+  const out = new Map();
+  const stale = [];
+  for (const id of ids) {
+    const hit = subagentCache.get(id);
+    if (hit && now - hit.at < SUBAGENT_TTL) out.set(id, hit.runs);
+    else stale.push(id);
+  }
+  await Promise.all(stale.map(async (id) => {
+    try {
+      const { ok, data } = await pi.subagents(id);
+      const runs = ok && Array.isArray(data && data.runs) ? data.runs : [];
+      subagentCache.set(id, { at: Date.now(), runs });
+      out.set(id, runs);
+    } catch {
+      out.set(id, []); // 单个会话取不到不影响整张任务表（与串行版一致）
+    }
+  }));
+  if (subagentCache.size > 64) {
+    for (const [id, hit] of subagentCache) {
+      if (now - hit.at > 5 * 60_000) subagentCache.delete(id);
+    }
+  }
+  return out;
+}
+
 async function dispatch(method, params, client) {
   const p = params && typeof params === "object" ? params : {};
   switch (method) {
@@ -342,35 +377,30 @@ async function dispatch(method, params, client) {
         }
       }
       // 子代理只在 pi 侧；取「运行中的会话 + 最近 12 个」，避免漏掉排在后面的活会话
-      const subagentScope = sessions.filter((s, i) => s.running || i < 12);
-      for (const s of subagentScope.slice(0, 20)) {
-        try {
-          const { ok, data } = await pi.subagents(s.id);
-          if (!ok || !data || !Array.isArray(data.runs)) continue;
-          for (const run of data.runs) {
-            if (run.status === "working" || (run.endedAt && Date.now() - run.endedAt < 3600e3)) {
-              tasks.push({
-                kind: "subagent",
-                id: `r:${s.id}:${run.id}`,
-                sessionId: s.id,
-                runId: run.id,
-                title: run.agent || "子代理",
-                detail: run.task || "",
-                status: run.status,
-                startedAt: run.startedAt || 0,
-                endedAt: run.endedAt || 0,
-                result: String(run.result || "").slice(0, 2000),
-                error: String(run.error || "").slice(0, 2000),
-                background: Boolean(run.background),
-                parentTitle: s.title,
-                model: run.model || "",
-                thinking: run.thinking || "",
-                childSessionId: run.childSessionId || "",
-              });
-            }
+      const subagentScope = sessions.filter((s, i) => s.running || i < 12).slice(0, 20);
+      const snapshots = await subagentSnapshots(subagentScope.map((s) => s.id));
+      for (const s of subagentScope) {
+        for (const run of snapshots.get(s.id) || []) {
+          if (run.status === "working" || (run.endedAt && Date.now() - run.endedAt < 3600e3)) {
+            tasks.push({
+              kind: "subagent",
+              id: `r:${s.id}:${run.id}`,
+              sessionId: s.id,
+              runId: run.id,
+              title: run.agent || "子代理",
+              detail: run.task || "",
+              status: run.status,
+              startedAt: run.startedAt || 0,
+              endedAt: run.endedAt || 0,
+              result: String(run.result || "").slice(0, 2000),
+              error: String(run.error || "").slice(0, 2000),
+              background: Boolean(run.background),
+              parentTitle: s.title,
+              model: run.model || "",
+              thinking: run.thinking || "",
+              childSessionId: run.childSessionId || "",
+            });
           }
-        } catch {
-          // 单个会话的子代理快照失败不影响整体任务列表
         }
       }
       tasks.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));

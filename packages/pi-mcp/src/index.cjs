@@ -534,7 +534,7 @@ function createPiMcpExtension(options = {}) {
     // the boot cost again.
     const started = await Promise.allSettled(
       servers
-        .filter((config) => config && typeof config.serverName === "string" && config.serverName)
+        .filter((config) => config && typeof config.serverName === "string" && config.serverName && !config.shared && !config.disabled && !config.disabledPi)
         .map(async (config) => {
           try {
             const entry = await getSharedMcpClient(config, { fetchImpl, logger });

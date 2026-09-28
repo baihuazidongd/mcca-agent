@@ -421,6 +421,7 @@ function renderAgentDock() {
 async function loadSessionSubagents() {
   if (!state.sessionId) {
     state.sessionSubagents = { agents: [], runs: [] };
+    clearInlineThreads();
     renderAgentDock();
     renderUnviewedFlag();
     return;
@@ -434,6 +435,7 @@ async function loadSessionSubagents() {
     state.sessionSubagents = snapshot || { agents: [], runs: [] };
     renderAgentDock();
     renderUnviewedFlag();
+    mountInlineChildren();
   } catch {
     // 会话尚未建立时保持现有图标
   } finally {
@@ -456,6 +458,7 @@ function applySubagentSnapshot(event) {
   };
   renderAgentDock();
   renderUnviewedFlag();
+  mountInlineChildren();
 }
 /** 工具行（子代理对话用）：与主对话同款 details.tool 结构。 */
 function agentToolDetail(event) {
@@ -541,11 +544,16 @@ function threadNodes(events, host = null) {
 const agentThreadCache = new Map(); // childId -> { el, events, count, loading, agent }
 let agentThreadTimer = 0;
 let agentThreadWatching = "";
+// 内联挂在主对话派生点下面的子线程：childSessionId -> agent 名。
+// 一个父对话能同时挂着 N 条，所以轮询是集合级的，不像模态那样一次只看一条。
+const inlineThreads = new Map();
+let inlineTimer = 0;
 
 function pruneAgentThreadCache(keepId) {
   if (agentThreadCache.size <= 6) return;
   for (const [key, entry] of agentThreadCache) {
-    if (key === keepId) continue;
+    // 内联中的 DOM 就长在父对话里，摘掉等于把那段子对话从主对话撕走
+    if (key === keepId || inlineThreads.has(key)) continue;
     entry.el.remove();
     agentThreadCache.delete(key);
     if (agentThreadCache.size <= 6) break;
@@ -597,6 +605,7 @@ function agentFallbackNodes(entry, error) {
   const nodes = [];
   if (run?.task) nodes.push(...threadNodes([{ type: "user", text: String(run.task) }]));
   if (run?.result || run?.error) nodes.push(...threadNodes([{ type: "assistant-end", text: run.result || "", error: run.error || undefined }]));
+  if (run?.failHint) nodes.push(el("p", { class: "dim" }, run.failHint));
   if (!nodes.length) {
     nodes.push(el("p", { class: "dim" }, error
       ? `拿不到这次对话的记录：${error.message}`
@@ -642,7 +651,16 @@ async function syncAgentThread(key, agentName, { force = false } = {}) {
   markAgentThreadWorking(entry, key);
   // 终态 run + 连续拉不到 → 停止空转轮询（对话框重开还会再试一次）
   const run = agentRunFor(entry);
-  if (failed && entry.fails >= 3 && run && TERMINAL_RUN_STATUS.has(String(run.status || ""))) stopAgentThreadWatch();
+  const terminal = Boolean(run && TERMINAL_RUN_STATUS.has(String(run.status || "")));
+  if (failed && entry.fails >= 3 && terminal) stopAgentThreadWatch();
+  // 内联的必须自己收敛：终态后多拉一轮把尾巴收干净就停，
+  // 否则一段长对话里每派一个子代理就多一条永久 1.5s 轮询。
+  if (terminal && inlineThreads.has(key)) {
+    entry.terminalHits = failed ? 0 : (entry.terminalHits || 0) + 1;
+    if (entry.terminalHits >= 2 || (failed && entry.fails >= 3)) dropInlineThread(key);
+  } else if (!terminal) {
+    entry.terminalHits = 0;
+  }
 }
 
 /** 打开对话框期间每 1.5s 拉一次增量：能看到工具在跑，不是静止画面。 */
@@ -661,6 +679,143 @@ function stopAgentThreadWatch() {
   if (agentThreadTimer) clearInterval(agentThreadTimer);
   agentThreadTimer = 0;
   agentThreadWatching = "";
+}
+
+// ── 子对话内联进主对话 ─────────────────────────────────────────────
+// 锚点是父转录里那次 subagent 工具调用的 details.tool[data-call=callId]：
+// 服务端快照每个 run 都带 callId，两边对得上就能把子对话就地挂在它被派出来
+// 的位置，全文流式展开，不用点开模态只看一条摘要。
+
+function dropInlineThread(key) {
+  if (!inlineThreads.delete(key)) return;
+  if (!inlineThreads.size && inlineTimer) {
+    clearInterval(inlineTimer);
+    inlineTimer = 0;
+  }
+}
+
+function clearInlineThreads() {
+  inlineThreads.clear();
+  if (inlineTimer) {
+    clearInterval(inlineTimer);
+    inlineTimer = 0;
+  }
+}
+
+/** 所有内联子线程共用一个 1.5s 轮询：N 条子对话同时往前流。 */
+function watchInlineThreads() {
+  if (inlineTimer || !inlineThreads.size) return;
+  inlineTimer = setInterval(() => {
+    for (const [key, agentName] of inlineThreads) void syncAgentThread(key, agentName);
+  }, 1500);
+}
+
+function inlineSlotOf(anchor) {
+  let slot = anchor.nextElementSibling;
+  if (!slot || !slot.classList.contains("agent-inline")) {
+    slot = el("div", { class: "agent-inline" });
+    anchor.after(slot);
+  }
+  return slot;
+}
+
+const RUN_STATUS_LABEL = { working: "运行中", completed: "完成", failed: "失败", stopped: "已停止", queued: "排队", unknown: "未知" };
+
+// failLabel 是后端按失败原因分好类的短标签（空返回 / 角色名不存在 / 超时）：
+// 光写「失败」分不清是被锁了权限还是模型没出声。
+function runStateLabel(run) {
+  const base = RUN_STATUS_LABEL[run?.status] || String(run?.status || "");
+  return run?.failLabel ? `${base}·${run.failLabel}` : base;
+}
+
+/**
+ * 一个锚点下面挂 N 条子对话：一次 workflow 扇出只有一次 subagent 工具调用，
+ * 却可能派出 36 个子代理，它们全挂在那一行下面。
+ * 增量挂载——已经渲染过的块不重建，否则子代理陆续落盘时会反复整槽重画。
+ */
+function mountSlotChildren(slot, runs) {
+  const wanted = new Set();
+  for (const run of runs) {
+    const status = String(run.status || "unknown");
+    // 终态却没留下子会话 = 永远不会有对话可回放（角色名不存在、空返回、被判死的孤儿）。
+    // 这类要以它自己的身份挂在主对话里、就地报错，不能缩成一句「N 个已结束但没有留下
+    // 对话」——36 个失败和 1 个失败在那句话里长得一模一样。
+    const key = String(run.childSessionId || (TERMINAL_RUN_STATUS.has(status) ? run.id : ""));
+    if (!key) continue;
+    wanted.add(key);
+    let block = slot.querySelector(`.agent-child[data-child="${CSS.escape(key)}"]`);
+    if (block) {
+      const chip = block.querySelector(".agent-child-state");
+      if (chip) chip.textContent = runStateLabel(run);
+      block.classList.toggle("failed", status === "failed");
+      // 没有子会话的块，占位文案就是终稿：再去拉转录只是每轮多三次必然 404
+      if (!run.childSessionId) continue;
+      if (TERMINAL_RUN_STATUS.has(status)) {
+        // 已经收敛（终态后停轮询）：快照再变也只补拉一次，不挂回定时器
+        void syncAgentThread(key, run.agent);
+        continue;
+      }
+      inlineThreads.set(key, run.agent || "");
+      continue;
+    }
+    const entry = getAgentThread(key, run.agent);
+    // 缓存里的 DOM 可能还挂在别处（换了会话又换回来），先摘下来再挂进这个槽
+    if (entry.el.parentNode) entry.el.remove();
+    block = el("div", { class: "agent-child", "data-child": key },
+      el("div", { class: "agent-child-head" },
+        agentAvatarImg(run.agent, 18),
+        el("span", { class: "nm" }, agentTitle(run.agent)),
+        el("span", { class: "agent-child-state" }, runStateLabel(run))),
+      entry.el);
+    if (status === "failed") block.classList.add("failed");
+    slot.append(block);
+    if (run.childSessionId) {
+      inlineThreads.set(key, run.agent || "");
+      void syncAgentThread(key, run.agent, { force: true });
+    } else {
+      setAgentPlaceholder(entry, agentFallbackNodes(entry, null));
+    }
+  }
+  // 快照里已经没有的块摘掉，别让上一轮的子对话赖在主对话里
+  for (const block of [...slot.querySelectorAll(".agent-child")]) {
+    if (wanted.has(block.dataset.child)) continue;
+    dropInlineThread(block.dataset.child);
+    block.remove();
+  }
+  // 还没落盘的子会话要说人话：不留空槽，也不让人以为根本没派出去。
+  // 终态却没有子会话的那些已经各自成块了，留在这儿只会重复一遍。
+  let waiting = 0;
+  for (const run of runs) {
+    if (run.childSessionId || TERMINAL_RUN_STATUS.has(String(run.status || ""))) continue;
+    waiting++;
+  }
+  const text = waiting ? `已派出 ${waiting} 个子代理，等它们的对话落盘…` : "";
+  const note = slot.querySelector(".agent-pending");
+  if (text) {
+    if (note) note.textContent = text;
+    else slot.prepend(el("div", { class: "agent-placeholder agent-pending" }, text));
+  } else if (note) {
+    note.remove();
+  }
+}
+
+function mountInlineChildren() {
+  const host = transcriptHost();
+  if (!host || !state.sessionId) return;
+  const byCall = new Map();
+  for (const run of state.sessionSubagents.runs || []) {
+    const callId = String(run.callId || "");
+    if (!callId) continue;
+    const list = byCall.get(callId);
+    if (list) list.push(run);
+    else byCall.set(callId, [run]);
+  }
+  for (const [callId, runs] of byCall) {
+    const anchor = host.querySelector(`details.tool[data-spawn="1"][data-call="${CSS.escape(callId)}"]`);
+    if (!anchor) continue;
+    mountSlotChildren(inlineSlotOf(anchor), runs);
+  }
+  watchInlineThreads();
 }
 
 async function openAgentRuns(name, childId) {
@@ -2800,6 +2955,7 @@ function renderEvent(event) {
           .find((row) => row.dataset.call === String(event.callId));
         if (duplicate) return null; // 重连/回放的同一调用不再新建一行计时
         const d = el("details", { class: "tool step", "data-call": event.callId, "data-tool-state": "running" });
+        if (event.name === "subagent") d.dataset.spawn = "1"; // 派生锚点：子对话就挂在这一行下面
         // 运行中的工具带秒级计时：长时间跑的命令一眼能看出是在跑还是卡了（回放不加）
         if (!state.replaying) d.dataset.startedAt = String(Number(event.at) || Date.now());
         d.append(el("summary", {},
@@ -2814,6 +2970,7 @@ function renderEvent(event) {
       const existing = matches.at(-1);
       for (const duplicate of matches.slice(0, -1)) duplicate.remove();
       const node = existing || el("details", { class: "tool step", "data-call": event.callId });
+      if (event.name === "subagent") node.dataset.spawn = "1"; // 回放时可能只有 end 帧，锚点照样要打上
       node.dataset.toolState = event.isError ? "failed" : "completed";
       node.classList.toggle("err", Boolean(event.isError));
       delete node.dataset.startedAt; // 结束：停表
@@ -2995,6 +3152,8 @@ function appendEvent(event) {
   if (!node) return;
   if (state.currentTurn && node.classList && node.classList.contains("step")) ensureTurnLead();
   (state.currentTurn ? state.currentTurn.body : transcriptHost()).append(node);
+  // 锚点进 DOM 之后才可能挂上子对话（快照可能早就到了）
+  if (node.dataset && node.dataset.spawn === "1") mountInlineChildren();
   scrollBottom();
 }
 
@@ -3067,6 +3226,7 @@ async function openSession(id, { keepTranscript, messageLimit = 50, expandHistor
   state.sessionId = id;
   state.pulledLevels = [];
   state.sessionSubagents = { agents: [], runs: [] };
+  clearInlineThreads(); // 上一个会话的内联子对话轮询必须停干净，不能跟着切过去
   state.currentTurn = null;
   // 按下的同一帧：高亮、标题、输入锁定。重画列表和拉历史都放到下一帧。
   markSessionActive(id);
@@ -3151,7 +3311,9 @@ async function openSession(id, { keepTranscript, messageLimit = 50, expandHistor
         transcript.classList.remove("switching");
         transcript.classList.add("settled");
         const remembered = restorePosition ? savedScroll(id) : null;
-        if (!expandHistory && remembered && remembered.atBottom === false) restoreScroll(id);
+        // 运行中的长任务必须回到最新输出；恢复旧的阅读位置会把正在生成的末尾藏掉。
+        if (session.running) forceScrollBottom();
+        else if (!expandHistory && remembered && remembered.atBottom === false) restoreScroll(id);
         else forceScrollBottom();
       } else {
       if (!shown) {
@@ -3281,6 +3443,9 @@ async function openSession(id, { keepTranscript, messageLimit = 50, expandHistor
         setScrollTop(transcript, 0);
         state.stickBottom = false;
         captureScroll(id);
+      } else if (session.running) {
+        // 切回仍在生成的会话时，优先显示最新思考/工具状态。
+        forceScrollBottom();
       } else if (resumeMid) {
         restoreScroll(id);
       } else {
@@ -3288,9 +3453,15 @@ async function openSession(id, { keepTranscript, messageLimit = 50, expandHistor
       }
       transcript.classList.add("settled");
       view.painted = true;
-      scheduleLinkify(view.el);
-      refreshDiff(); // 回放期跳过了逐条刷新，这里各补一次
-      refreshContext();
+      // 这些操作会遍历整棵长对话、读取文件或计算上下文；延后到首屏稳定后，
+      // 避免切回超长任务时出现几秒空白/卡顿。切换代际变化后结果自动作废。
+      const postPaintGen = gen;
+      setTimeout(() => {
+        if (postPaintGen !== state.openSeq || state.sessionId !== id) return;
+        scheduleLinkify(view.el);
+        void refreshDiff();
+        void refreshContext();
+      }, session.running ? 350 : 80);
       }
     }
     $("transcript").classList.remove("switching");

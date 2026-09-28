@@ -1543,6 +1543,27 @@ dialog::backdrop { background: rgba(20, 14, 8, 0.7); }
 .agent-thread .tool { max-width: 96%; }
 .agent-thread .tool pre { max-height: 220px; }
 .agent-thread .tool-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* 内联在主对话里的子对话：挂在派生它的那次 subagent 工具行下面，左轨标出层级，
+   全文就地展开——不是点开模态才给一段摘要。min-height 归零，短任务不留大空盒。 */
+.agent-inline { margin: 2px 0 8px 14px; padding-left: 10px; border-left: 3px solid var(--gold); }
+.agent-inline .agent-thread { min-height: 0; max-height: 60vh; }
+/* 一次扇出可能派出几十个子代理，全挂在同一个锚点下面：每条一行小抬头，
+   名字 + 状态，失败的整条压暗红边，一眼看得出这批到底成没成。 */
+.agent-child { margin: 6px 0; }
+.agent-child-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 11px;
+  color: #6b5a35;
+}
+.agent-child-head .nm { font-weight: bold; }
+.agent-child-state { color: #9a8348; }
+.agent-child.failed { border-left: 3px solid var(--red); padding-left: 8px; margin-left: -3px; }
+.agent-child.failed .agent-child-state { color: var(--red); }
+/* 拉不到子对话记录时的兜底行：说清楚是怎么回事，不留空白也不留转圈 */
+.agent-placeholder { align-self: flex-start; padding: 3px 8px; font-size: 11px; line-height: 1.6; color: #9a8348; }
 /* 「子代理回执」这类宿主提示：羊皮纸小条，和重试提示同族但更安静 */
 .host-notice {
   align-self: flex-start;

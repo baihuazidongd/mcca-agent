@@ -30,7 +30,10 @@ const { listCliHistory, deleteCliHistory } = require("./cli-history.cjs");
 const { readDiary, writeDiary, createEntry, DIARY_MAX } = require("./diary.cjs");
 
 // This file lives at packages/portal/server.cjs, so the repo root is two levels up.
-const ROOT = path.resolve(__dirname, "..", "..");
+const { createPaths } = require("../runtime-core/paths.cjs");
+const paths = createPaths();
+const ROOT = paths.app;
+const runtimeRegistry = require("../runtime-core/registry.cjs").registry();
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 const PORT = Number(process.env.PORTAL_PORT) || 3470;
@@ -38,18 +41,18 @@ const PORT = Number(process.env.PORTAL_PORT) || 3470;
 const PLUGINS_DIR = process.env.MCCA_PLUGINS_DIR || path.join(ROOT, "plugins");
 const IDE_PLUGINS_DIR = path.join(ROOT, "packages", "agent-ide", "plugins");
 const IDE_SKILLS_DIR = path.join(ROOT, "packages", "agent-ide", "skills");
-const PLUGINS_CONFIG = process.env.MCCA_PLUGINS_CONFIG || path.join(ROOT, "config", "plugins.json");
-const MCP_CONFIG = process.env.MCCA_MCP_CONFIG || path.join(ROOT, "config", "mcp.json");
+const PLUGINS_CONFIG = process.env.MCCA_PLUGINS_CONFIG || path.join(paths.data, "plugins.json");
+const MCP_CONFIG = process.env.MCCA_MCP_CONFIG || path.join(paths.data, "mcp.json");
 const SKILLS_DIR = process.env.MCCA_SKILLS_DIR || path.join(ROOT, "skills");
 // Missing file means every instance stays installed, so an existing setup does not change.
-const INSTANCES_FILE = process.env.MCCA_INSTANCES_CONFIG || path.join(ROOT, "config", "portal-instances.json");
-const DIARY_FILE = process.env.MCCA_DIARY_FILE || path.join(ROOT, "config", "portal-diary.json");
+const INSTANCES_FILE = process.env.MCCA_INSTANCES_CONFIG || path.join(paths.data, "portal-instances.json");
+const DIARY_FILE = process.env.MCCA_DIARY_FILE || path.join(paths.data, "portal-diary.json");
 
 // The dsh patch overlays generated/committed in the shared config dir. dsh is
 // launched from its own repo (`pnpm dsh web`) with these as extra layers, so
 // dsh sources stay untouched.
 const DSH_PATCH = process.env.MCCA_DSH_PATCH || path.join(ROOT, "config", "dsh.patch.yml");
-const DSH_MCP_PATCH = process.env.MCCA_DSH_MCP_PATCH || path.join(ROOT, "config", "dsh-mcp.patch.yml");
+const DSH_MCP_PATCH = process.env.MCCA_DSH_MCP_PATCH || path.join(paths.data, "dsh-mcp.patch.yml");
 
 let memoryStorePromise;
 function loadMemoryStore() {
@@ -83,7 +86,7 @@ async function regenerateDshMcpPatch() {
       // Windows absolute paths must be file:// URLs for dynamic import.
       require("node:url").pathToFileURL(generatorPath).href
     );
-    const rows = generateMcpPatch(MCP_CONFIG, DSH_MCP_PATCH);
+    const rows = generateMcpPatch(MCP_CONFIG, DSH_MCP_PATCH, [require("../runtime-core/mcp-config.cjs").workbenchMcp(paths)]);
     return rows.length;
   } catch (error) {
     console.error("[portal] failed to regenerate dsh mcp patch:", error.message);
@@ -96,117 +99,9 @@ async function regenerateDshMcpPatch() {
 // The app's dsh boots against its own copy of the user's dsh home (sessions,
 // workspaces, settings, MCP scripts), so the live ~/.dsh instance is never
 // touched. Overridable; set to the literal home to share it instead.
-const DSH_HOME = process.env.MCCA_DSH_HOME || path.join(ROOT, "config", "dsh-home");
+const DSH_HOME = process.env.MCCA_DSH_HOME || path.join(paths.data, "dsh-home");
 
-const AGENTS = {
-  dsh: {
-    label: "dsh",
-    port: Number(process.env.DSH_PORT) || 3081,
-    cmd: process.env.DSH_CMD || "pnpm",
-    args: process.env.DSH_ARGS
-      ? process.env.DSH_ARGS.split(" ")
-      : [
-          "dsh",
-          "--profile",
-          "web",
-          "--patch",
-          dshPatchArg(),
-          "--patch",
-          dshMcpPatchArg(),
-          "--port",
-          String(process.env.DSH_PORT || 3081),
-        ],
-    // dsh runs from the vendored copy inside this workspace (vendor/dsh) so
-    // the app has zero references to the original D:/DeepSeek Harness repo.
-    cwd: process.env.DSH_CWD || path.join(ROOT, "vendor", "dsh"),
-    env: { DSH_HOME },
-    // `pnpm` is a .cmd shim on Windows — spawn through the shell.
-    shell: process.platform === "win32",
-  },
-  "pi-web": {
-    // pi 侧原生 Web UI（2026-09 重写版）：REST + SSE 直连 pi，不再套 dsh 壳。
-    // 旧 pi-dsh-web 兼容层已归档（archive/pi-dsh-web-*-20260906.tar.gz）。
-    label: "pi",
-    port: Number(process.env.PI_PORT) || 3458,
-    cmd: process.env.PI_WEB_CMD || process.execPath,
-    args: process.env.PI_WEB_ARGS
-      ? process.env.PI_WEB_ARGS.split(" ")
-      : [path.join("packages", "pi-web", "server.cjs")],
-    cwd: ROOT,
-    env: { PI_MODEL: process.env.PI_MODEL || "" },
-  },
-  "codex-cli": {
-    // 命令行，不启网页。打开本页终端里的 Codex。
-    label: "codex",
-    cli: true,
-    port: null,
-    cmd: "",
-    args: [],
-    cwd: ROOT,
-    env: {},
-  },
-  "openhands-web": {
-    // 网页会话（:3460）套 pi-web 页面。terminal 表示管理页仍可另开命令行。
-    label: "openhands",
-    terminal: true,
-    port: Number(process.env.OH_WEB_PORT || process.env.OPENHANDS_PORT) || 3460,
-    cmd: process.env.OH_WEB_CMD || process.execPath,
-    args: process.env.OH_WEB_ARGS
-      ? process.env.OH_WEB_ARGS.split(" ")
-      : [path.join("packages", "openhands-web", "server.cjs")],
-    cwd: ROOT,
-    env: {},
-  },
-  "grok-web": {
-    // 网页会话（:3461）套 pi-web 页面。terminal 表示管理页仍可另开命令行。
-    label: "grok",
-    terminal: true,
-    port: Number(process.env.GROK_WEB_PORT || process.env.GROK_PORT) || 3461,
-    cmd: process.env.GROK_WEB_CMD || process.execPath,
-    args: process.env.GROK_WEB_ARGS
-      ? process.env.GROK_WEB_ARGS.split(" ")
-      : [path.join("packages", "grok-web", "server.cjs")],
-    cwd: ROOT,
-    env: {},
-  },
-  "hermes-web": {
-    // 命令行，不启网页。打开本页终端里的Hermes Agent `hermes`。
-    label: "hermes",
-    cli: true,
-    port: null,
-    cmd: "",
-    args: [],
-    cwd: ROOT,
-    env: {},
-  },
-  canvas: {
-    // 画布：本机 ComfyUI 生图服务（portal 画布页签 iframe 的后端，dsh/pi 经
-    // comfy MCP 出生图工具）。启动解释器必须是 ComfyUI 自带 venv 的 python：
-    // 无 stdlib 的魔改解释器会在启动时报 `No module named 'encodings'`，
-    // --directml 路径已实机验证可起。
-    label: "canvas",
-    port: Number(process.env.CANVAS_PORT) || 8188,
-    cmd: process.env.CANVAS_CMD || "D:\\ComfyUI\\venv\\Scripts\\python.exe",
-    args: process.env.CANVAS_ARGS
-      ? process.env.CANVAS_ARGS.split(" ")
-      : ["main.py", "--directml", "--listen", "0.0.0.0", "--port", String(process.env.CANVAS_PORT || 8188)],
-    cwd: process.env.CANVAS_CWD || "D:\\ComfyUI",
-    env: {},
-  },
-  mobile: {
-    // 手机接入层：把 pi-web/portal 聚合成移动协议，局域网 0.0.0.0 直连 +
-    // 公网 relay 出站（config/mobile.json 的 relayUrl）。portal 启动时随起，
-    // 手机 App 的「管理」页也能启停/重启它。
-    label: "mobile",
-    port: Number(process.env.MCCA_MOBILE_PORT) || 3471,
-    cmd: process.env.MCCA_MOBILE_CMD || process.execPath,
-    args: process.env.MCCA_MOBILE_ARGS
-      ? process.env.MCCA_MOBILE_ARGS.split(" ")
-      : [path.join("packages", "mobile-bridge", "server.cjs")],
-    cwd: ROOT,
-    env: {},
-  },
-};
+const AGENTS = runtimeRegistry.resolve({ openhandsWeb, hermesWorkspace, hermesDashboard });
 
 function dshPatchArg() {
   return DSH_PATCH.replaceAll("\\", "/");
@@ -248,6 +143,7 @@ function loadResidentSet() {
 let residentIds = loadResidentSet();
 /** 本轮被手动停掉的常驻服务：巡检跳过它们，直到用户再启动或门户重启。 */
 const residentPaused = new Set();
+const restartBackoff = require("../runtime-core/supervisor.cjs").createBackoff();
 
 function isResident(agent) {
   return residentIds.has(agent);
@@ -265,7 +161,7 @@ function persistResident(next) {
 function setResident(agent, on) {
   const cfg = AGENTS[agent];
   if (!cfg) return { ok: false, error: `unknown agent: ${agent}` };
-  if (cfg.cli || cfg.terminal) return { ok: false, error: "命令行服务没有常驻后端" };
+  if (cfg.cli) return { ok: false, error: "命令行服务没有常驻后端" };
   const next = new Set(residentIds);
   if (on) next.add(agent);
   else next.delete(agent);
@@ -286,11 +182,15 @@ function isRunning(agent) {
 async function ensureResidentAgents() {
   for (const agent of webAgents()) {
     if (!isResident(agent) || !isInstalled(agent) || residentPaused.has(agent)) continue;
-    if (children.has(agent) && isRunning(agent)) continue;
+    if (children.has(agent) && isRunning(agent)) {
+      if (Date.now() - children.get(agent).startedAt > 60000) restartBackoff.healthy(agent);
+      continue;
+    }
+    if (!restartBackoff.ready(agent)) continue;
     if (children.has(agent)) children.delete(agent); // 接管来的进程已经没了，腾出槽位
     const result = await startAgent(agent);
     if (result.ok) console.log(`[portal] resident ${agent} started (pid ${result.pid})`);
-    else console.error(`[portal] resident ${agent} failed: ${result.error}`);
+    else { restartBackoff.failed(agent); console.error(`[portal] resident ${agent} failed: ${result.error}`); }
   }
 }
 
@@ -301,6 +201,61 @@ function startResidentWatch() {
     residentTickRunning = true;
     ensureResidentAgents().finally(() => { residentTickRunning = false; });
   }, 20_000).unref();
+}
+
+/**
+ * 卡死探测：进程活着、端口在听、HTTP 层也还能收请求，但走 bridge 的接口永不返回。
+ * 2026-09-24 pi-web 两次这样把界面钉在「初始化失败 / signal timed out」上，而进程表
+ * 和端口探活都显示一切正常 —— 只能真发一个业务请求才知道。
+ */
+const livenessFails = new Map();
+
+function httpProbe(port, path, timeoutMs) {
+  return new Promise((resolve) => {
+    const at = Date.now();
+    const req = http.get({ host: "127.0.0.1", port, path, timeout: timeoutMs }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ ok: res.statusCode < 400, status: res.statusCode, ms: Date.now() - at }));
+    });
+    req.on("timeout", () => req.destroy(new Error(`${timeoutMs}ms 无响应`)));
+    req.on("error", (error) => resolve({ ok: false, error: error.message }));
+  });
+}
+
+async function checkLiveness() {
+  for (const agent of webAgents()) {
+    const cfg = AGENTS[agent];
+    if (!cfg.liveness || !isInstalled(agent) || residentPaused.has(agent)) continue;
+    const rec = children.get(agent);
+    if (!rec || !isRunning(agent)) { livenessFails.delete(agent); continue; }
+    // 预热期不判：pi-web 冷启动时 /api/sessions 实测要 3s 以上。
+    if (Date.now() - rec.startedAt < 60_000) continue;
+    const probe = await httpProbe(cfg.port, cfg.liveness.path, cfg.liveness.timeoutMs || 12_000);
+    if (probe.ok) { livenessFails.delete(agent); continue; }
+    // /api/health 不碰 bridge：它能答就说明是 handler 挂死，不是整个 HTTP 层死了。
+    const fast = await httpProbe(cfg.port, "/api/health", 2_000);
+    const kind = fast.ok ? "接口挂死（/api/health 仍正常应答）" : "HTTP 层无应答";
+    const why = `${cfg.liveness.path} ${probe.error || `HTTP ${probe.status}`} — ${kind}`;
+    const fails = (livenessFails.get(agent) || 0) + 1;
+    livenessFails.set(agent, fails);
+    if (fails < 2) {
+      logLine(agent, `[liveness] 探测失败 1/2：${why}`);
+      continue;
+    }
+    logLine(agent, `[liveness] 连续 ${fails} 次失败：${why} — 自动重启`);
+    livenessFails.delete(agent);
+    const r = await restartAgent(agent);
+    logLine(agent, r.ok ? `[liveness] 已重启 pid ${r.pid}` : `[liveness] 重启失败：${r.error}`);
+  }
+}
+
+let livenessTickRunning = false;
+function startLivenessWatch() {
+  setInterval(() => {
+    if (livenessTickRunning) return;
+    livenessTickRunning = true;
+    checkLiveness().finally(() => { livenessTickRunning = false; });
+  }, 30_000).unref();
 }
 
 function loadDiary() {
@@ -349,7 +304,7 @@ const lastExit = new Map();
  */
 const NOTIFY_QUEUE_MAX = 1000; // 内存里保留的历史条数（给事件板回放用）
 const NOTIFY_STORE_MAX = 2000; // 磁盘归档上限，超过就压实成最近这些条
-const NOTIFY_STORE = process.env.MCCA_NOTIFY_STORE || path.join(ROOT, "config", "portal-events.jsonl");
+const NOTIFY_STORE = process.env.MCCA_NOTIFY_STORE || path.join(paths.data, "portal-events.jsonl");
 const notifyQueue = [];
 let notifySeq = 0;
 let notifyStored = 0; // 归档里当前条数（估算，用于压实判断）
@@ -429,9 +384,10 @@ async function enrichNotifySource(source) {
 const desk = createDesk();
 
 function deskSides() {
-  return ["pi-web", "openhands-web", "grok-web"]
+  // openhands 不在列：它的页签现在是官方 `openhands web`，没有我们的会话 API 可问。
+  return runtimeRegistry.all().filter(r => r.taskProtocol === "sessions-v1").map(r => r.id)
     .filter((id) => AGENTS[id] && AGENTS[id].port)
-    .map((id) => ({ agent: AGENTS[id].label, port: AGENTS[id].port }));
+    .map((id) => ({ agent: AGENTS[id].page || AGENTS[id].label, port: AGENTS[id].port }));
 }
 
 async function deskSnapshot() {
@@ -442,7 +398,7 @@ async function deskSnapshot() {
   });
 }
 
-const AGENDA_FILE = process.env.MCCA_AGENDA_FILE || path.join(ROOT, "config", "portal-agenda.json");
+const AGENDA_FILE = process.env.MCCA_AGENDA_FILE || path.join(paths.data, "portal-agenda.json");
 const AGENDA_MAX = 80;
 
 function readAgenda() {
@@ -703,7 +659,7 @@ loadNotifyArchive();
 // ── 用量报表（「消耗」面板）─────────────────────────────────────────
 // pi：扫会话文件里 assistant 消息的 usage（按 服务商/模型 汇总，60s 缓存）。
 // dsh：读它自己的 token 热力图 .dsh/storages/tok-heatmap.json（byModel 已按模型聚合）。
-const PI_SESSIONS_DIR = path.join(ROOT, "config", ".pi-web", "sessions");
+const PI_SESSIONS_DIR = path.join(paths.data, ".pi-web", "sessions");
 // dsh 的真实数据在用户主目录的 .dsh（portal 自带的 config/dsh-home 只是个几乎没跑过的副本），
 // 所以按候选顺序找：env 覆盖 → 用户主目录 → portal 的 DSH_HOME。
 const DSH_HOMES = [
@@ -854,7 +810,7 @@ if (process.argv[2] === "--usage-scan") {
   process.exit(0);
 }
 
-const JOURNAL_DIR = process.env.MCCA_JOURNAL_DIR || path.join(ROOT, "config", "journals");
+const JOURNAL_DIR = process.env.MCCA_JOURNAL_DIR || path.join(paths.data, "journals");
 const JOURNAL_MAX = 400;
 
 function journalFile(agent) {
@@ -895,9 +851,13 @@ function writeJournal(agent, text) {
 function logLine(agent, text) {
   const rec = children.get(agent);
   if (!rec) return;
+  if (["dsh-rpc-v1","dsh-remote-v1"].includes(AGENTS[agent]?.taskProtocol)) {
+    rec.authBuffer=((rec.authBuffer||"")+String(text)).slice(-2000);
+    require("../runtime-core/dsh-auth.cjs").capture(AGENTS[agent].port,rec.authBuffer,paths);
+  }
   const rows = [];
   for (const line of String(text).split(/\r?\n/)) {
-    if (line.trim()) rows.push(line);
+    if (line.trim()) rows.push(line.replace(/([?&]token=)[A-Za-z0-9_-]+/g,"$1[redacted]"));
   }
   if (!rows.length) return;
   rec.log.push(...rows);
@@ -914,32 +874,8 @@ function logLine(agent, text) {
 //   pi     → 命令行含 "pi-web"（仓库路径本身足够唯一，免端口校验）
 //   canvas → 命令行含 "main.py" 且含本端口号（ComfyUI 的启动行；其它端口的
 //            python main.py 一律不动）
-const RECLAIM_SIGNATURES = {
-  dsh: "apps/cli/src/bin.ts",
-  // 允许从 pi-web 工作目录直接执行 `node server.cjs`，这时命令行里没有
-  // “pi-web” 路径；端口校验保证只接管 3458 上的该服务。
-  "pi-web": "server.cjs",
-  "openhands-web": "openhands-web",
-  "grok-web": "grok-web",
-  "hermes-web": "hermes",
-  canvas: "main.py",
-  mobile: "mobile-bridge",
-};
-
-// 端口号是否必须出现在命令行里才算“同一个服务”。
-//   dsh / canvas：签名不唯一（3080 的 `bin.ts web`、别的 `python main.py`
-//     都长得一样），必须靠端口号区分，否则误伤无关实例；
-//   pi：端口是 server.cjs 的代码默认值，命令行不出现——同旧 pi-dsh-web 的
-//     结论，免端口校验。
-const RECLAIM_REQUIRE_PORT = {
-  dsh: true,
-  "pi-web": false,
-  "openhands-web": false,
-  "grok-web": false,
-  "hermes-web": false,
-  canvas: true,
-  mobile: false,
-};
+const RECLAIM_SIGNATURES = Object.fromEntries(runtimeRegistry.all().map(r => [r.id, r.reclaim?.signature]));
+const RECLAIM_REQUIRE_PORT = Object.fromEntries(runtimeRegistry.all().map(r => [r.id, r.reclaim?.requirePort !== false]));
 
 function listeningPid(port) {
   const { execSync } = require("node:child_process");
@@ -1052,9 +988,84 @@ function hermesEnv() {
   return { HERMES_HOME: hermes.home, [pathKey]: `${bin};${parts.join(";")}` };
 }
 
+/**
+ * `hermes dashboard` 的启动参数。启动时解析而不是写进 AGENTS：可执行文件路径
+ * 取决于 hermes.home（MCCA_HERMES_HOME 可覆盖），端口也来自 AGENTS 自身。
+ * cwd 用 hermes 自己的工作区，与原来的命令行会话保持一致。
+ */
+function hermesDashboard() {
+  const found = hermes.launcher();
+  if (!found) return { error: "Hermes Agent is not installed" };
+  return {
+    cmd: found.file,
+    args: [...found.args, "dashboard", "--no-open", "--port", String(AGENTS["hermes-dashboard"].port)],
+    cwd: hermes.ensureWorkspace(),
+    env: hermesEnv(),
+  };
+}
+
+/** gateway 的 API 密钥：由 hermes 自己的 .env 保管（gitignored，不入库）。 */
+function hermesApiToken() {
+  try {
+    const text = fs.readFileSync(path.join(hermes.home, ".env"), "utf8");
+    return (text.match(/^API_SERVER_KEY=(.+)$/m) || [])[1] || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Hermes Workspace 的启动参数。生产入口只读 process.env（没有 dotenv），
+ * 所以 .env 里那些值必须由门户显式传进来。
+ */
+function hermesWorkspace() {
+  const dir = path.join(ROOT, "vendor", "hermes-workspace");
+  if (!fs.existsSync(path.join(dir, "dist", "server", "server.js"))) {
+    return { cmd:paths.node, args:[path.join(ROOT,"packages/runtime-core/dashboard-entry.cjs")], cwd:ROOT, env:{PORT:String(AGENTS["hermes-web"].port),MCCA_DASHBOARD_PORT:String(AGENTS["hermes-dashboard"].port)} };
+  }
+  const token = hermesApiToken();
+  return {
+    cmd: process.execPath,
+    args: ["server-entry.js"],
+    cwd: dir,
+    env: {
+      HOST: "127.0.0.1",
+      PORT: String(AGENTS["hermes-web"].port),
+      HERMES_API_URL: "http://127.0.0.1:8642",
+      HERMES_DASHBOARD_URL: `http://127.0.0.1:${AGENTS["hermes-dashboard"].port}`,
+      HERMES_AGENT_PATH: hermes.installDir,
+      // 网关归 hermes 自己管。workspace 默认会在自己退出时 SIGTERM 掉它，
+      // 那会让别的会话连带断掉，所以关掉它的自动托管。
+      HERMES_WORKSPACE_AUTO_START_AGENT: "false",
+      ...(token ? { HERMES_API_TOKEN: token } : {}),
+    },
+  };
+}
+
+/**
+ * OpenHands 页签的启动参数：官方 `openhands web`。启动时解析而不是写进 AGENTS，
+ * 因为 .venv 位置随安装走，服务商注入也要读当前的 cli-providers 选择。
+ */
+function openhandsWeb() {
+  const exe = require("../runtime-core/runtime-recipes.cjs").runtimeEntry(paths,"openhands-web") || path.join(ROOT, "vendor", "cli", "openhands", ".venv", "Scripts", process.platform === "win32" ? "openhands.exe" : "openhands");
+  if (!fs.existsSync(exe)) return { error: "找不到 OpenHands：vendor/cli/openhands/.venv 没装好" };
+  let use = { args: [], env: {} };
+  try {
+    use = cliProviders.launch("openhands");
+  } catch (error) {
+    return { error: error.message };
+  }
+  return {
+    cmd: exe,
+    // --override-with-envs 是全局标记，必须在 `web` 子命令之前。
+    args: [...use.args, "web", "--host", "127.0.0.1", "--port", String(AGENTS["openhands-web"].port)],
+    cwd: ROOT,
+    env: { OPENHANDS_SUPPRESS_BANNER: "1", ...use.env },
+  };
+}
+
 function findCodexBin() {
-  if (process.env.CODEX_BIN && fs.existsSync(process.env.CODEX_BIN)) return process.env.CODEX_BIN;
-  const base = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "OpenAI", "Codex", "bin");
+  if (process.env.CODEX_BIN && fs.existsSync(process.env.CODEX_BIN)) return process.env.CODEX_BIN;  const base = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "OpenAI", "Codex", "bin");
   if (!fs.existsSync(base)) return "";
   const hits = [];
   for (const name of fs.readdirSync(base)) {
@@ -1073,7 +1084,7 @@ function cliCommand(agent, resume) {
     try { return cliProviders.launch(tool); }
     catch (error) { return { args: [], env: {}, error: error.message }; }
   };
-  if (agent === "codex-cli") {
+  if (agent === "codex-web") {
     const exe = findCodexBin();
     const use = tuned("codex");
     return { title: "Codex", file: exe, args: [...use.args, ...(id ? ["resume", id] : [])], env: use.env, error: use.error };
@@ -1084,7 +1095,7 @@ function cliCommand(agent, resume) {
     return { title: "Grok Build", file: fs.existsSync(exe) ? exe : "", args: [...use.args, ...(id ? ["--resume", id] : [])], env: use.env, error: use.error };
   }
   if (agent === "openhands-web") {
-    const exe = path.join(ROOT, "vendor", "cli", "openhands", ".venv", "Scripts", "openhands.exe");
+    const exe = require("../runtime-core/runtime-recipes.cjs").runtimeEntry(paths,"openhands-web") || path.join(ROOT, "vendor", "cli", "openhands", ".venv", "Scripts", "openhands.exe");
     const use = tuned("openhands");
     return {
       title: "OpenHands",
@@ -1203,6 +1214,13 @@ async function startAgent(agent, options = {}) {
   if (startInFlight.has(agent)) return { ok: false, error: `${agent} start already in progress` };
   startInFlight.add(agent);
   try {
+    // 依赖先起来：Hermes Workspace 离了 dashboard 只剩聊天，没有会话/技能/任务。
+    // 依赖起不来不拦本体启动——它会退到功能受限模式，比整块白屏好。
+    for (const dep of cfg.requires || []) {
+      if (children.has(dep) && isRunning(dep)) continue;
+      const started = await startAgent(dep);
+      if (!started.ok) console.error(`[portal] ${agent}: 依赖 ${dep} 没起来 —— ${started.error}`);
+    }
     // 孤儿实例回收：portal 视角未运行但端口被同服务旧实例占着——结束它再启动。
     const reclaimed = reclaimStaleInstance(agent, cfg);
     if (reclaimed) {
@@ -1230,6 +1248,11 @@ async function startAgent(agent, options = {}) {
       return { ok: false, error: `port ${cfg.port} is not bindable yet; retry in a moment` };
     }
 
+    // 可执行文件/参数在启动时才解析的服务（hermes dashboard）。解析失败必须在
+    // 占位之前返回，否则 children 里会留一条「运行中但 pid 为 null」的幽灵记录。
+    const spec = typeof cfg.resolve === "function" ? cfg.resolve() : cfg;
+    if (spec.error) return { ok: false, error: spec.error };
+
     const rec = { child: null, startedAt: Date.now(), log: [] };
     // Reserve the slot synchronously so a fast-exiting child's exit event cannot
     // be mistaken for a newer instance's (and double-start is impossible).
@@ -1237,9 +1260,10 @@ async function startAgent(agent, options = {}) {
 
     let child;
     try {
-      child = spawn(cfg.cmd, cfg.args, {
-        cwd: cfg.cwd,
-        env: { ...process.env, ...(cfg.env || {}), MCCA_PORT: String(cfg.port) },
+      if (["dsh-rpc-v1","dsh-remote-v1"].includes(cfg.taskProtocol)) require("../runtime-core/dsh-auth.cjs").clear(cfg.port,paths);
+      child = spawn(spec.cmd, spec.args, {
+        cwd: spec.cwd || cfg.cwd,
+        env: { ...process.env, ...(cfg.env || {}), ...(spec.env || {}), MCCA_PORT: String(cfg.port) },
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         shell: cfg.shell === true,
@@ -1261,7 +1285,12 @@ async function startAgent(agent, options = {}) {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => logLine(agent, chunk));
     child.stderr.on("data", (chunk) => logLine(agent, chunk));
-    child.on("error", (error) => logLine(agent, `spawn error: ${error.message}`));
+    child.on("error", (error) => {
+      logLine(agent, `spawn error: ${error.message}`);
+      if (children.get(agent) === rec) children.delete(agent);
+      restartBackoff.failed(agent);
+      lastExit.set(agent, { code: null, signal: null, at: Date.now(), logTail: rec.log.slice(-60) });
+    });
     child.on("exit", (code, signal) => {
       // Only report if this record is still the current record (stopAgent
       // deletes it, a manual kill does not).
@@ -1271,6 +1300,7 @@ async function startAgent(agent, options = {}) {
         // 非主动停止的退出=崩溃。日志随记录一起删掉的话，状态页只剩“已停止”
         // 三个字，什么也诊断不出来；这里留一份尾巴供 agentStatus 展示。
         if (!rec.stopping) {
+          restartBackoff.failed(agent);
           lastExit.set(agent, {
             code: code ?? null,
             signal: signal ?? null,
@@ -1285,6 +1315,10 @@ async function startAgent(agent, options = {}) {
       }
     });
 
+    if (!child.pid) {
+      const spawned = await new Promise(resolve => { child.once("spawn", () => resolve(true)); child.once("error", () => resolve(false)); });
+      if (!spawned) return { ok: false, error: `Cannot start ${cfg.label}; check executable and working directory` };
+    }
     return { ok: true, pid: child.pid, port: cfg.port };
   } finally {
     startInFlight.delete(agent);
@@ -1571,7 +1605,10 @@ function agentStatus(agent) {
   return {
     agent,
     label: cfg.label,
+    page: cfg.page || agent,
+    capabilities: cfg.capabilities || [],
     port: cfg.cli ? null : cfg.port,
+    ...(["dsh-rpc-v1","dsh-remote-v1"].includes(cfg.taskProtocol) ? { launchUrl:require("../runtime-core/dsh-auth.cjs").launchUrl(cfg.port,paths) } : {}),
     cli: Boolean(cfg.cli || cfg.terminal),
     running: Boolean(rec?.child && rec.child.exitCode === null),
     pid: rec?.child?.pid ?? null,
@@ -1582,6 +1619,7 @@ function agentStatus(agent) {
     installed: isInstalled(agent),
     resident: isResident(agent),
     residentPaused: residentPaused.has(agent),
+    restartBackoff: restartBackoff.state(agent),
   };
 }
 
@@ -1625,9 +1663,9 @@ async function listPlugins() {
 const CLIENT_PLUGIN_DIRS = [
   path.join(ROOT, "packages", "client-plugins"),
 ];
-const CLIENT_PLUGINS_CONFIG = path.join(ROOT, "config", "client-plugins.json");
-const HOST_MANIFEST = path.join(ROOT, "config", "hot-plugins.json");
-const HOST_DISABLED = path.join(ROOT, "config", "hot-plugins.disabled.json");
+const CLIENT_PLUGINS_CONFIG = path.join(paths.data, "client-plugins.json");
+const HOST_MANIFEST = path.join(paths.data, "hot-plugins.json");
+const HOST_DISABLED = path.join(paths.data, "hot-plugins.disabled.json");
 
 function readJson(file, fallback) {
   try {
@@ -1778,7 +1816,7 @@ async function setMcpEnabled(serverName, agent, enabled) {
   const servers = readMcpServers(MCP_CONFIG);
   const target = servers.find((s) => s.serverName === serverName);
   if (!target) return { ok: false, error: `unknown server: ${serverName}` };
-  const key = agent === "ds" ? "disabledDs" : "disabledPi";
+  const key = target.shared ? "disabled" : agent === "ds" ? "disabledDs" : "disabledPi";
   if (enabled) delete target[key];
   else target[key] = true;
   fs.mkdirSync(path.dirname(path.resolve(MCP_CONFIG)), { recursive: true });
@@ -1813,6 +1851,7 @@ async function upsertMcpServer(body) {
     entry.url = String(body.url);
   }
   if (body.dsh === false) entry.dsh = false;
+  if (body.shared === true) entry.shared = true;
   const servers = readMcpServers(MCP_CONFIG);
   const idx = servers.findIndex((s) => s.serverName === serverName);
   if (idx >= 0) servers[idx] = entry;
@@ -2188,6 +2227,9 @@ async function handleApi(req, res, url) {
 
   try {
     if (parts[0] !== "api") return false;
+    if (parts[1] === "runtimes" && method === "GET") {
+      sendJson(res, 200, { ok: true, runtimes: runtimeRegistry.all().map(r => ({ id: r.id, page: r.page, label: r.label, group: r.group, capabilities: r.capabilities, port: AGENTS[r.id].port })) }); return true;
+    }
 
     // ── 任务通知队列（宿主 → portal → 系统通知 / 事件板）────────────
     // dsh / pi 在目标完成或受阻时 POST 到这里；前端轮询 /api/notifications
@@ -2355,7 +2397,7 @@ async function handleApi(req, res, url) {
     if (parts[1] === "status" && method === "GET") {
       sendJson(res, 200, {
         ok: true,
-        agents: [agentStatus("dsh"), agentStatus("pi-web"), agentStatus("codex-cli"), agentStatus("openhands-web"), agentStatus("grok-web"), agentStatus("hermes-web"), agentStatus("canvas"), agentStatus("mobile")],
+        agents: Object.keys(AGENTS).map(agentStatus),
       });
       return true;
     }
@@ -2534,10 +2576,31 @@ async function handleApi(req, res, url) {
   }
 }
 
+const workbench = require("../runtime-core/workbench.cjs").createWorkbench({
+  onRuntimeInstalled: async () => Object.assign(AGENTS, runtimeRegistry.resolve({ openhandsWeb, hermesWorkspace, hermesDashboard })),
+  extraRuntimeInstallers: {
+    "hermes-web": async () => { if (isRunning("hermes-dashboard")) throw new Error("请先停止 Hermes Dashboard 再更新"); return runHermesInstall(await hermesLatestTag()); },
+    "hermes-dashboard": async () => { if (isRunning("hermes-web")) throw new Error("请先停止 Hermes 页面再更新"); return runHermesInstall(await hermesLatestTag()); },
+  },
+  onExtensionChange: async (kind, file) => kind === "config" && file === "mcp.json" ? { dshServers: await regenerateDshMcpPatch() } : { reloadRequired: true },
+  paths, registry: runtimeRegistry, port: PORT,
+  runtime: id => AGENTS[id], status: agentStatus,
+  control: async (id, action) => action === "start" ? startAgent(id) : action === "stop" ? stopAgent(id) : action === "restart" ? restartAgent(id) : installInstance(id),
+  extensions: async () => ({ plugins: await listPlugins(), mcp: (await listMcp()).map(row => ({ serverName: row.serverName, transport: row.transport, shared: row.shared === true, disabled: row.disabled === true, disabledPi: row.disabledPi, disabledDs: row.disabledDs })), skills: listSkills() }),
+  toggleExtension: args => args.kind === "mcp" ? setMcpEnabled(args.name, args.target, args.enabled) : setPluginEnabled(args.name, args.target, args.enabled, args.surface || "shared"),
+  registerRuntime: async row => {
+    if (AGENTS[row.id] && isRunning(row.id)) throw new Error("请先停止此 IDE 再修改接入配置");
+    runtimeRegistry.add(row);
+    Object.assign(AGENTS, runtimeRegistry.resolve({ openhandsWeb, hermesWorkspace, hermesDashboard }));
+    SERVICE_KINDS.add(row.id);
+    return { ok: true, id: row.id, ...installInstance(row.id) };
+  },
+});
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
   const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
 
+  if (await workbench.handle(req, res, url)) return;
   if (pathname.startsWith("/api/")) {
     if (await handleApi(req, res, url)) return;
   }
@@ -2571,6 +2634,20 @@ server.on("error", (error) => {
   }
 });
 
+workbench.attach(server);
+let workbenchClosing = false;
+async function closeWorkbench() {
+  if (workbenchClosing) return;
+  workbenchClosing = true;
+  const timeout = setTimeout(() => process.exit(1), 12000); timeout.unref();
+  server.close();
+  await workbench.dispose();
+  ptyHost.closeAll();
+  clearTimeout(timeout); process.exit(0);
+}
+process.once("SIGTERM", closeWorkbench);
+process.once("SIGINT", closeWorkbench);
+
 async function restoreManagedProcesses() {
   if (!process.env.MCCA_PORTAL_HANDOVER) return;
   const records = JSON.parse(process.env.MCCA_PORTAL_HANDOVER);
@@ -2600,25 +2677,25 @@ async function restoreManagedProcesses() {
 }
 
 restoreManagedProcesses().then(async () => {
-  for (const agent of webAgents()) {
+  for (const agent of process.env.MCCA_PORTAL_PASSIVE === "1" ? [] : webAgents()) {
     if (!isInstalled(agent)) continue;
     try { adoptListener(agent); } catch (error) { console.error(`[portal] adopt ${agent}: ${error.message}`); }
   }
   // adopt 只接上还活着的；标了常驻的由这里补起来，之后交给巡检看护。
   try {
-    await ensureResidentAgents();
+    if (process.env.MCCA_PORTAL_PASSIVE !== "1") await ensureResidentAgents();
   } catch (error) {
     console.error(`[portal] resident startup: ${error.message}`);
   }
-  startResidentWatch();
+  if (process.env.MCCA_PORTAL_PASSIVE !== "1") { startResidentWatch(); startLivenessWatch(); }
   server.listen(PORT, "127.0.0.1", () => {
   console.log(`portal → http://localhost:${PORT}`);
   console.log(`  dsh        : ${AGENTS.dsh.cmd} ${AGENTS.dsh.args.join(" ")} (port ${AGENTS.dsh.port})`);
   // 打开应用不拉起 IDE、命令行和工具。上面的 adopt 只接上上次还开着的进程。
-  void regenerateDshMcpPatch().then((count) => {
+  if (process.env.MCCA_PORTAL_PASSIVE !== "1") void regenerateDshMcpPatch().then((count) => {
     if (count) console.log(`  dsh mcp patch regenerated: ${count} server(s)`);
   });
-  if (!hermes.installed()) {
+  if (process.env.MCCA_HERMES_AUTO_INSTALL === "1" && !hermes.installed()) {
     void hermesLatestTag().then((tag) => runHermesInstall(tag)).then((result) => {
       console.log(result.ok ? `  hermes installed ${result.version}` : `  hermes install skipped: ${result.error}`);
     });

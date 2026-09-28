@@ -11,7 +11,7 @@ const MARK_START = "# mcca-pi-provider:start";
 const MARK_END = "# mcca-pi-provider:end";
 
 function createCliProviders({ root }) {
-  const file = process.env.MCCA_CLI_PROVIDERS || path.join(root, "config", "cli-providers.json");
+  const file = process.env.MCCA_CLI_PROVIDERS || path.join(process.env.MCCA_DATA_DIR || path.join(root, "config"), "cli-providers.json");
   const hermesHome = process.env.MCCA_HERMES_HOME || path.join(root, "vendor", "cli", "hermes");
 
   function modelsFile() {

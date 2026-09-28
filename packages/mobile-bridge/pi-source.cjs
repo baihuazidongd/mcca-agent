@@ -74,7 +74,7 @@ class PiSource {
     void tick();
   }
 
-  stop() {
+  dispose() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     for (const ctrl of this.streams.values()) {
@@ -409,6 +409,7 @@ class PiSource {
   }
 
   async stop(id) {
+    if (id === undefined) { this.dispose(); return; }
     const { status, json } = await this.httpJson("POST", `/api/sessions/${encodeURIComponent(id)}/stop`, {}, 15000);
     return { ok: status === 200, error: status === 200 ? undefined : (json && json.error) || `stop → ${status}` };
   }

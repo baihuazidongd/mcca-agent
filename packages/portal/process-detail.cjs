@@ -1,11 +1,11 @@
 "use strict";
 
-const SERVICE_KINDS = new Set(["pi-web", "codex-cli", "openhands-web", "grok-web", "hermes-web", "mobile", "dsh", "canvas"]);
+const SERVICE_KINDS = new Set(require("../runtime-core/registry.cjs").registry().all().map(r => r.id));
 const HELPER_KINDS = new Set(["gpu", "network", "storage", "crashpad", "utility"]);
 const SERVICE_LABELS = {
   dsh: "dsh 服务",
   "pi-web": "pi / 工具服务",
-  "codex-cli": "Codex",
+  "codex-web": "Codex",
   "openhands-web": "OpenHands 服务",
   "grok-web": "Grok Build 服务",
   "hermes-web": "Hermes Agent",
@@ -29,7 +29,12 @@ function commandHint(commandLine) {
   if (cl.toLowerCase().includes("mcca-browser")) return "mcca-browser";
   if (cl.includes("--embedded-browser-webview")) return "webview-host";
   const scripts = [...cl.matchAll(/(?:[A-Za-z]:[\\/])?[\w.()-]+(?:[\\/][\w.()-]+)+\.(?:cjs|mjs|js|py)\b/gi)];
-  if (scripts.length) return scripts[scripts.length - 1][0];
+  if (scripts.length) {
+    // mini-web 一个文件两种驱动，光看脚本名分不出是 codex 还是 grok 的服务。
+    const tool = /--tool=([a-z]+)/i.exec(cl);
+    const last = scripts[scripts.length - 1][0];
+    return tool ? `${last} --tool=${tool[1]}` : last;
+  }
   const exes = [...cl.matchAll(/(?:[A-Za-z]:[\\/])[^\s"]+\.exe\b/gi)];
   for (let i = exes.length - 1; i >= 0; i -= 1) {
     const exe = exes[i][0];
@@ -58,9 +63,13 @@ function describeAppProcess({ name, hint, pid, portalPid }) {
     return { kind: "utility", label: short ? "界面组件 " + short : "界面组件" };
   }
   if (low.includes("/pi-web/server.cjs")) return { kind: "pi-web", label: "pi / 工具服务" };
-  if (/(^|[\\/])codex(\.exe)?$/i.test(pathHint)) return { kind: "codex-cli", label: "Codex" };
-  if (low.includes("/openhands-web/server.cjs")) return { kind: "openhands-web", label: "OpenHands 服务" };
-  if (low.includes("/grok-web/server.cjs")) return { kind: "grok-web", label: "Grok Build 服务" };
+  if (low.includes("/mini-web/server.cjs")) {
+    return low.includes("--tool=codex")
+      ? { kind: "codex-web", label: "Codex" }
+      : { kind: "grok-web", label: "Grok Build 服务" };
+  }
+  if (/(^|[\\/])codex(\.exe)?$/i.test(pathHint)) return { kind: "codex-web", label: "Codex" };
+  if (/(^|[\\/])openhands(\.exe)?$/i.test(pathHint)) return { kind: "openhands-web", label: "OpenHands 服务" };
   if (low.includes("/hermes-web/server.cjs") || /(^|[\\/])hermes(\.exe)?$/i.test(pathHint)) {
     return { kind: "hermes-web", label: "Hermes Agent" };
   }

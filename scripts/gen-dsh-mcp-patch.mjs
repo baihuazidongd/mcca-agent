@@ -53,12 +53,13 @@ export function mcpRow(cfg) {
   };
 }
 
-export function generateMcpPatch(mcpConfigPath, outPath) {
-  const rows = readServers(mcpConfigPath)
+export function generateMcpPatch(mcpConfigPath, outPath, additional = []) {
+  const configured = readServers(mcpConfigPath);
+  const rows = [...configured, ...additional.filter(row => !configured.some(existing => existing.serverName === row.serverName))]
     // `dsh: false` marks servers dsh already mounts through its own profile
     // patch (e.g. copied dsh-home rows); emitting them again would collide on
     // serverName. Those rows still reach the pi side via @mcca/pi-mcp.
-    .filter((cfg) => cfg?.dsh !== false)
+    .filter((cfg) => cfg?.dsh !== false && !cfg?.disabledDs && !cfg?.disabled && !cfg?.shared)
     .map(mcpRow)
     .filter(Boolean);
   const body = rows.length

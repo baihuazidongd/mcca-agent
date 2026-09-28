@@ -11,9 +11,13 @@
   },
   "scripts": {
     "setup": "pnpm run build && node scripts/bootstrap.mjs",
-    "start": "node scripts/start.mjs",
+    "start": "node packages/portal/server.cjs",
     "portal": "node packages/portal/server.cjs",
     "pi-web": "node packages/pi-web/server.cjs",
+    "dist:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1",
+    "test:workbench": "node --test test/runtime-core.test.mjs test/workbench-adapters.test.mjs",
+    "smoke:browser-extension": "node scripts/smoke-browser-extension.mjs",
+    "smoke:workbench": "node scripts/smoke-workbench.mjs",
     "build": "pnpm --filter @mcca/plugin-sdk build && pnpm --filter @mcca/plugin-host build",
     "test": "node --test \"test/**/*.test.mjs\"",
     "test:pi-web": "node --test \"packages/pi-web/test/**/*.test.cjs\""

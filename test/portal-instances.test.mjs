@@ -30,8 +30,8 @@ test("an empty list stays empty and unknown ids are dropped", () => {
   assert.deepEqual(readInstalled(file), []);
   writeInstalled(file, ["canvas", "nope", "canvas", "mobile"]);
   assert.deepEqual(readInstalled(file), ["canvas", "mobile"]);
-  writeInstalled(file, ["codex-web", "pi-web", "codex-cli"]);
-  assert.deepEqual(readInstalled(file), ["codex-cli", "pi-web"]);
+  writeInstalled(file, ["codex-cli", "pi-web", "codex-web"]);
+  assert.deepEqual(readInstalled(file), ["codex-web", "pi-web"]);
 });
 
 test("corrupt json falls back to the full set", () => {
@@ -52,15 +52,15 @@ test("ides and extensions stay in their groups", () => {
   );
   assert.deepEqual(
     INSTANCE_IDS.filter((id) => INSTANCE_GROUPS[id] === "cli"),
-    ["codex-cli", "openhands-web", "grok-web", "hermes-web"],
+    ["codex-web", "openhands-web", "grok-web", "hermes-web", "hermes-dashboard"],
   );
 });
 
 test("resident defaults to empty and drops unknown ids", () => {
   const file = tempFile();
   assert.deepEqual(readResident(file), []);
-  assert.deepEqual(writeResident(file, ["mobile", "nope", "mobile", "codex-web"]), ["mobile", "codex-cli"]);
-  assert.deepEqual(readResident(file), ["mobile", "codex-cli"]);
+  assert.deepEqual(writeResident(file, ["mobile", "nope", "mobile", "codex-cli"]), ["mobile", "codex-web"]);
+  assert.deepEqual(readResident(file), ["mobile", "codex-web"]);
 });
 
 test("installed and resident share one file without clobbering each other", () => {

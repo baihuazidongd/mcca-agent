@@ -1,0 +1,11 @@
+{
+  "name": "@mcca/mini-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "极简网页会话：一个页面两种驱动（codex app-server / grok agent stdio），替代这两家的命令行页",
+  "main": "server.cjs",
+  "scripts": {
+    "start:codex": "node server.cjs --tool=codex",
+    "start:grok": "node server.cjs --tool=grok"
+  }
+}

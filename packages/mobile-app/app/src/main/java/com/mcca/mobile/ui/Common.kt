@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -40,16 +41,39 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.mcca.mobile.data.Avatars
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+/**
+ * 只在界面可见时跑的轮询：退到后台就停，回到前台立刻再跑一轮。
+ *
+ * 直接 `LaunchedEffect { while(true) delay(...) }` 的循环在 Activity 只 stop 不
+ * destroy 时是继续跑的 —— 手机揣兜里也在每 5s 往桌面打一次 tasks.list（那一次要
+ * 扇 12–20 个会话快照，实测持续吃掉桌面两成单核）。
+ */
+@Composable
+fun whilePolling(vararg keys: Any?, block: suspend () -> Unit) {
+    val owner = LocalContext.current as? LifecycleOwner
+    LaunchedEffect(*keys) {
+        if (owner == null) {
+            block()
+        } else {
+            owner.repeatOnLifecycle(Lifecycle.State.STARTED) { block() }
+        }
+    }
+}
 
 /**
  * 头像色系按 agent 归属：pi 走蓝靛、dsh 走紫罗兰、未知走石板灰。

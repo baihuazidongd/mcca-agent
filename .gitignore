@@ -18,6 +18,8 @@ config/mcp.json
 config/hot-plugins.json
 config/dsh-mcp.patch.yml
 config/dsh-home/
+# Backups taken before rewriting a generated config.
+config/*.before-*
 
 # ── Runtime state (written by the app, never published) ─────────
 # pi agent credentials/settings copy
@@ -36,13 +38,17 @@ config/portal-agenda.json
 config/memory.json
 config/cli-providers.json
 # per-web-shell session transcripts and window state. The pi-web transcripts in
-# particular carry API keys pasted into chat.
+# particular carry API keys pasted into chat, and the mini-web state remembers
+# probed workspaces as absolute paths that name the local user.
 config/.pi-web/
 config/.pi-web-verify/
 config/.pi-web-*/
 config/.codex-web/
 config/.grok-web/
 config/.openhands-web/
+config/.mini-web/
+config/workbench/
+config/runtimes/
 # zhipin-guard scan history / zhipin-mcp browser profile (cookies, DBs)
 config/zhipin-guard/
 config/zhipin-mcp/
@@ -58,6 +64,9 @@ vendor/dsh/
 # Bundled CLIs (Grok Build, OpenHands). Copied into the app; not a pointer at
 # another install.
 vendor/cli/
+# Third-party Hermes Workspace UI — the chat surface the Hermes tab embeds.
+# Clone + node_modules + build output, not published.
+vendor/hermes-workspace/
 
 # ── Shared library ──────────────────────────────────────────────
 # Local plugins, MCP servers and skills a user grows over time carry machine-
@@ -96,6 +105,8 @@ packages/pi-web/test/*.png
 # Point at a private local art workspace and its asset tree.
 packages/pi-web/test/list-assets.cjs
 packages/pi-web/test/pick-avatars.cjs
+# Reads a named pi-web session transcript and writes a personal chat export.
+extract_chat.py
 
 # ── Archived app data ───────────────────────────────────────────
 # Session transcripts + settings under config/.pi-agent: carries the local

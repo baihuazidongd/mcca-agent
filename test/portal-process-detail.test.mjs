@@ -37,9 +37,10 @@ test("command hints identify app processes without keeping the raw command line"
 test("labels say what the process is for", () => {
   const cases = [
     ["packages/pi-web/server.cjs", "node", "pi-web", "pi / 工具服务"],
-    ["C:/Users/me/AppData/Local/OpenAI/Codex/bin/codex.exe", "codex", "codex-cli", "Codex"],
-    ["packages/openhands-web/server.cjs", "node", "openhands-web", "OpenHands 服务"],
-    ["packages/grok-web/server.cjs", "node", "grok-web", "Grok Build 服务"],
+    ["C:/Users/me/AppData/Local/OpenAI/Codex/bin/codex.exe", "codex", "codex-web", "Codex"],
+    ["vendor/cli/openhands/.venv/Scripts/openhands.exe", "openhands", "openhands-web", "OpenHands 服务"],
+    ["packages/mini-web/server.cjs --tool=grok", "node", "grok-web", "Grok Build 服务"],
+    ["packages/mini-web/server.cjs --tool=codex", "node", "codex-web", "Codex"],
     ["vendor/cli/hermes/hermes.exe", "hermes", "hermes-web", "Hermes Agent"],
     ["packages/mobile-bridge/server.cjs", "node", "mobile", "手机桥接"],
     ["packages/portal/server.cjs", "node", "portal", "门户服务"],
@@ -107,7 +108,7 @@ test("stop and restart stay inside the owning service", () => {
   assert.equal(tool.canRestart, false);
 
   const codex = buildProcessRow({
-    pid: 30, name: "codex", hint: "C:/Users/me/AppData/Local/OpenAI/Codex/bin/codex.exe", started: "100", portalPid: PORTAL, service: "codex-cli", rootPid: 30,
+    pid: 30, name: "codex", hint: "C:/Users/me/AppData/Local/OpenAI/Codex/bin/codex.exe", started: "100", portalPid: PORTAL, service: "codex-web", rootPid: 30,
   });
   assert.equal(codex.label, "Codex");
   assert.equal(codex.canRestart, true);

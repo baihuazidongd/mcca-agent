@@ -19,11 +19,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const ROOT = path.resolve(__dirname, "..", "..");
+const paths = require("../runtime-core/paths.cjs").createPaths();
+const ROOT = paths.app;
 // 凭据/模型目录：默认 pi 全局 agent 目录（pi CLI 的 models/auth 落点）。
 const AGENT_DIR = process.env.MCCA_AGENT_DIR || path.join(process.env.USERPROFILE || "", ".pi", "agent");
 // 会话目录：本包私有（旧 pi-dsh-web 的 config/.pi-agent 已随其归档删除）。
-const SESSION_DIR = process.env.MCCA_PI_WEB_SESSIONS || path.join(ROOT, "config", ".pi-web", "sessions");
+const SESSION_DIR = process.env.MCCA_PI_WEB_SESSIONS || path.join(paths.data, ".pi-web", "sessions");
 // 事件缓冲上限：溢出时优先淘汰「增量」事件（思考/正文流），保住结构事件（用户消息、
 // 回复、工具、轮次）。否则几千个 delta 会把用户消息挤出缓冲，回放缺消息、「对话定位」消失。
 const EVENTS_MAX = 4000;
@@ -56,7 +57,7 @@ const Diff = require("diff");
 const { PresetContextStore, normalizePresetConfig, createPresetContextExtension } = require("./preset-context.cjs");
 const { createImagePruneExtension } = require("./image-prune.cjs");
 const subagents = require("./subagents.cjs");
-const { SubagentRuns, idFromSessionFile, conversationEvents, isChildSessionInfo } = require("./subagent-runs.cjs");
+const { SubagentRuns, idFromSessionFile, conversationEvents, isChildSessionInfo, classifyFailure, FAILURE_CLASSES } = require("./subagent-runs.cjs");
 const { createNativeSubagents, createObserver, requestRpc } = require("./subagent-extension.cjs");
 
 // ——————————————————————————————————————————————————————————————————————————————
@@ -140,11 +141,13 @@ function receiptStatus(data) {
   return "失败";
 }
 function receiptPreview(data) {
-  const raw = typeof data.summary === "string" && data.summary.trim()
-    ? data.summary
-    : Array.isArray(data.results)
-      ? data.results.map((child) => (child && typeof child.summary === "string" ? child.summary : "")).filter(Boolean).join("\n")
-      : "";
+  // 没有摘要就退回 error：分不出类的失败若只写「（无输出摘要）」，父代理拿到的
+  // 信息量比界面上还少，而它只能凭这条回执决定要不要重跑。
+  const summaries = Array.isArray(data.results)
+    ? data.results.map((child) => (child && typeof child.summary === "string" ? child.summary : "")).filter(Boolean).join("\n")
+    : "";
+  const raw = (typeof data.summary === "string" && data.summary.trim()) ? data.summary
+    : summaries || (typeof data.error === "string" ? data.error : "");
   const lines = String(raw).replace(/\r/g, "").split("\n").map((line) => line.trim()).filter(Boolean);
   // 子代理的输出常带一段验收 JSON（"noStagedFiles": true 之类）：挑像人话的行，
   // 实在没有才退回原文，别把 JSON 片段塞进回执给人和父代理看
@@ -165,24 +168,57 @@ function fmtElapsedShort(ms) {
   if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
   return `${Math.floor(seconds / 3600)} 时 ${Math.floor((seconds % 3600) / 60)} 分`;
 }
+function receiptFailure(data) {
+  if (data.success === true) return null;
+  return classifyFailure([data.error, data.summary, receiptPreview(data)].filter(Boolean).join("\n"));
+}
 function formatSubagentReceipt(data) {
   const lines = [`【子代理回执】${data.agent || "子代理"} ${receiptStatus(data)}${Number(data.durationMs) > 0 ? ` · ${fmtElapsedShort(Number(data.durationMs))}` : ""}`];
-  lines.push(receiptPreview(data) || "（无输出摘要）");
+  const failure = receiptFailure(data);
+  if (failure) lines.push(`${failure.label}：${failure.hint}`);
+  else lines.push(receiptPreview(data) || "（无输出摘要）");
   const artifact = receiptArtifactPath(data);
-  if (artifact) lines.push(`产物：${artifact}`);
+  if (artifact && !failure) lines.push(`产物：${artifact}`);
   if (data.triggerTurn === false) lines.push("（结果已就绪，需要时读产物或在界面上向用户汇报）");
   return lines.join("\n");
 }
 function formatSubagentReceiptGroup(items) {
   const lines = [`【子代理回执】${items.length} 个任务结束`];
+  const classes = new Map();
   items.forEach((data, index) => {
-    const preview = receiptPreview(data) || "（无输出摘要）";
+    const failure = receiptFailure(data);
+    if (failure) classes.set(failure.key, (classes.get(failure.key) || 0) + 1);
     const secs = Number(data.durationMs) > 0 ? ` · ${fmtElapsedShort(Number(data.durationMs))}` : "";
-    lines.push(`${index + 1}. ${data.agent || "子代理"} ${receiptStatus(data)}${secs}：${preview}`);
+    // 认得出死法的行只写死法：36 行「没有输出」对父代理没有信息量，
+    // 它需要的是「这批是同一个原因，按这个原因重跑」。
+    const tail = failure ? failure.label : (receiptPreview(data) || "（无输出摘要）");
+    lines.push(`${index + 1}. ${data.agent || "子代理"} ${receiptStatus(data)}${secs}：${tail}`);
   });
   const artifact = items.map(receiptArtifactPath).find(Boolean);
-  if (artifact) lines.push(`产物：${artifact}`);
+  if (artifact && !classes.size) lines.push(`产物：${artifact}`);
+  for (const [key, count] of classes) {
+    const failure = FAILURE_CLASSES.find((item) => item.key === key);
+    if (failure) lines.push(`${failure.label} ×${count}：${failure.hint}`);
+  }
   return lines.join("\n");
+}
+
+// 会话名在 session_info 行里，不在第一行的会话头上。列会话只读 8KB，
+// 所以只在已读到的窗口里找；子代理的名字（subagent-worker-xxx）就在第二行。
+function nameInHeadLines(text, firstLineEnd) {
+  const rest = firstLineEnd >= 0 ? text.slice(firstLineEnd + 1) : "";
+  const lines = rest.split("\n");
+  const limit = Math.min(lines.length, 32);
+  let name = "";
+  for (let i = 0; i < limit; i++) {
+    const line = (lines[i] || "").replace(/^﻿/, "").trim();
+    if (!line) continue;
+    let entry = null;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (entry && entry.type === "session_info" && typeof entry.name === "string" && entry.name) name = entry.name;
+    if (entry && entry.type === "message") break;
+  }
+  return name;
 }
 
 class PiWebBridge {
@@ -386,16 +422,17 @@ class PiWebBridge {
     const runtime = await this.runtime();
     const { createPiAdapter } = await import("@mcca/pi-adapter");
     const { createPiMcpExtension, readMcpServers } = await import("@mcca/pi-mcp");
-    const mcpServers = readMcpServers(path.join(ROOT, "config", "mcp.json"));
+    const mcpServers = readMcpServers(path.join(paths.data, "mcp.json"));
+    if (!mcpServers.some(row => row.serverName === "mcca-workbench")) mcpServers.push(require("../runtime-core/mcp-config.cjs").workbenchMcp());
     const piAdapter = createPiAdapter({
       pluginsDir: path.join(ROOT, "plugins"),
-      configPath: path.join(ROOT, "config", "plugins.json"),
+      configPath: path.join(paths.data, "plugins.json"),
       cwd: ROOT,
       onMcpServer: (cfg) => mcpServers.push(cfg),
     });
     const ideAdapter = createPiAdapter({
       pluginsDir: path.join(ROOT, "packages", "agent-ide", "plugins"),
-      configPath: path.join(ROOT, "config", "plugins.json"),
+      configPath: path.join(paths.data, "plugins.json"),
       cwd,
     });
     const { createMemoryContextExtension } = await import("../agent-ide/memory-prompt.mjs");
@@ -1148,7 +1185,7 @@ class PiWebBridge {
         path: file,
         id: String(entry.id || idFromName),
         cwd: typeof entry.cwd === "string" ? entry.cwd : "",
-        name: "",
+        name: nameInHeadLines(text, end),
         parentSessionPath: entry.parentSession || "",
         created: Number.isNaN(created.getTime()) ? stamp : created,
         modified: stamp,
@@ -2323,12 +2360,12 @@ class PiWebBridge {
   async envInfo() {
     const sdk = await this.sdkReady();
     const { readMcpServers } = await import("@mcca/pi-mcp");
-    const mcp = readMcpServers(path.join(ROOT, "config", "mcp.json")).map((s) => s.serverName);
+    const mcp = readMcpServers(path.join(paths.data, "mcp.json")).map((s) => s.serverName);
     const plugins = [];
     const pluginDirs = [path.join(ROOT, "plugins"), path.join(ROOT, "packages", "agent-ide", "plugins")];
     let enableConfig = {};
     try {
-      enableConfig = JSON.parse(fs.readFileSync(path.join(ROOT, "config", "plugins.json"), "utf8").replace(/^\uFEFF/, "")) || {};
+      enableConfig = JSON.parse(fs.readFileSync(path.join(paths.data, "plugins.json"), "utf8").replace(/^\uFEFF/, "")) || {};
     } catch {
       // 无配置按全默认
     }
@@ -2369,7 +2406,7 @@ class PiWebBridge {
   }
 
   settingsFile() {
-    return process.env.MCCA_PI_WEB_SETTINGS || path.join(ROOT, "config", ".pi-web", "settings.json");
+    return process.env.MCCA_PI_WEB_SETTINGS || path.join(paths.data, ".pi-web", "settings.json");
   }
 
   readSettings() {
@@ -3292,7 +3329,7 @@ function normalizeEfforts(raw) {
   return map;
 }
 
-module.exports = { PiWebBridge, ROOT, AGENT_DIR, SESSION_DIR, THINKING_LEVELS };
+module.exports = { PiWebBridge, ROOT, AGENT_DIR, SESSION_DIR, THINKING_LEVELS, formatSubagentReceipt, formatSubagentReceiptGroup };
 
 
 

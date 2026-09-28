@@ -522,7 +522,7 @@ private fun GoalCard(
 private fun TaskStrip(running: Boolean, startedAt: Long, queue: Int, onStop: () -> Unit) {
     if (!running && queue == 0) return
     var tick by remember { mutableStateOf(0L) }
-    LaunchedEffect(running) {
+    whilePolling(running) {
         while (running) {
             tick = System.currentTimeMillis()
             delay(1000)

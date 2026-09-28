@@ -2,8 +2,7 @@ $ErrorActionPreference = 'Stop'
 trap {
     Write-Host ("Portal update failed: " + $_.Exception.Message) -ForegroundColor Red
     Write-Host $_.ScriptStackTrace
-    Read-Host 'Press Enter to return'
-    break
+    exit 1
 }
 $repoRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { 'D:\dshpi' }
 if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'packages/portal/server.cjs'))) {
@@ -25,6 +24,15 @@ if ($owner.CommandLine -notmatch 'packages[\\/]portal[\\/]server.cjs') {
     throw 'Unexpected process on port 3470; nothing was stopped.'
 }
 $nodeExecutable = (Get-Command node.exe).Source
+& $nodeExecutable --check (Join-Path $repoRoot 'packages/portal/server.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Portal syntax check failed; existing process retained.' }
+$desk = Invoke-RestMethod 'http://127.0.0.1:3470/api/desk' -TimeoutSec 20
+if (@($desk.running).Count -gt 0) { throw 'Active IDE tasks detected; finish or explicitly stop them before portal update.' }
+try {
+    Invoke-RestMethod 'http://127.0.0.1:3470/api/workbench/prepare-restart' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30 | Out-Null
+} catch {
+    if ([int]$_.Exception.Response.StatusCode -ne 404) { throw }
+}
 $logDir = Join-Path $repoRoot '.playwright-mcp'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $records | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $logDir 'portal-handover.json') -Encoding UTF8
@@ -39,11 +47,18 @@ try {
     do {
         Start-Sleep -Milliseconds 500
         try {
-            $current = Invoke-RestMethod 'http://127.0.0.1:3470/api/status' -TimeoutSec 2
-            if ($current.ok) { break }
+            $catalog = Invoke-RestMethod 'http://127.0.0.1:3470/api/runtimes' -TimeoutSec 5
+            $current = Invoke-RestMethod 'http://127.0.0.1:3470/api/status' -TimeoutSec 10
+            if ($current.ok -and $catalog.ok -and @($catalog.runtimes).Count -gt 0) { break }
         } catch { $current = $null }
     } while ((Get-Date) -lt $deadline)
-    if (-not $current.ok) { throw "Portal did not start. Check $logDir\portal-resource-err.log" }
+    try {
+        $catalog = Invoke-RestMethod 'http://127.0.0.1:3470/api/runtimes' -TimeoutSec 15
+        $current = Invoke-RestMethod 'http://127.0.0.1:3470/api/status' -TimeoutSec 15
+    } catch {
+        throw "Portal did not start. Check $logDir\portal-resource-err.log"
+    }
+    if (-not $current -or -not $catalog -or $current.ok -ne $true -or $catalog.ok -ne $true) { throw "Portal did not start. Check $logDir\portal-resource-err.log" }
     foreach ($record in $records) {
         $service = $current.agents | Where-Object agent -eq $record.agent
         if (-not $service.running -or $service.pid -ne $record.pid) { throw "Service handover failed: $($record.agent)" }

@@ -30,7 +30,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,11 +53,13 @@ import kotlinx.coroutines.delay
 fun TasksScreen(onOpenSession: (Session) -> Unit, onOpenSubagent: (Task) -> Unit = {}) {
     var segment by remember { mutableIntStateOf(0) }
     var tick by remember { mutableStateOf(0L) }
-    LaunchedEffect(Unit) {
+    whilePolling {
         Store.refreshTasks()
         Store.loadNotices()
         while (true) {
-            delay(5000)
+            // 一次 tasks.list 要在桌面侧扇 12–20 个会话快照；没有活计时 20s 一轮足够
+            val busy = Store.tasks.any { it.status == "working" }
+            delay(if (busy) 5000 else 20_000)
             tick = System.currentTimeMillis()
             Store.refreshTasks()
         }

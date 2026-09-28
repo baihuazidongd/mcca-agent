@@ -35,7 +35,6 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,7 +58,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun BoardScreen() {
     var tick by remember { mutableStateOf(0L) }
-    LaunchedEffect(Unit) {
+    whilePolling {
         Store.loadNotices()
         Store.markBoardSeen()
         while (true) {

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简易会话</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="bar-left">
+      <span class="brand" id="tool-name">…</span>
+      <select id="provider" class="pick" title="服务商"></select>
+      <select id="model" class="pick" title="模型"></select>
+    </div>
+    <div class="bar-right">
+      <button class="ghost" id="pick-cwd" title="新建会话用的目录"><span id="cwd-name">工作区</span></button>
+      <button class="ghost" id="new-session">新会话</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="side">
+      <div class="side-head">
+        <span>会话</span>
+        <button class="ghost tiny" id="refresh-sessions" title="刷新">↻</button>
+      </div>
+      <ul class="sessions" id="sessions"></ul>
+    </aside>
+
+    <section class="chat">
+      <div class="log" id="log"></div>
+      <div class="empty" id="empty">
+        <p>选好服务商和目录，直接开始。</p>
+        <p class="dim">左键会话可回看，新会话按当前目录建。</p>
+      </div>
+      <footer class="composer">
+        <textarea id="input" rows="3" placeholder="要它做什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <div class="composer-row">
+          <span class="hint" id="hint"></span>
+          <div class="composer-actions">
+            <button class="ghost danger" id="stop" disabled>停止</button>
+            <button class="primary" id="send" disabled>发送</button>
+          </div>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <div class="modal" id="dir-modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <button class="ghost tiny" id="dir-up" title="上一级">↑</button>
+        <span class="modal-path" id="dir-path"></span>
+        <button class="ghost tiny" id="dir-close">✕</button>
+      </div>
+      <ul class="dir-list" id="dir-list"></ul>
+      <div class="modal-foot">
+        <span class="dim" id="dir-current"></span>
+        <button class="primary" id="dir-choose">用这个目录</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

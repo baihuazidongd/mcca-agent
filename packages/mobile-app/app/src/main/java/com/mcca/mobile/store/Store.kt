@@ -1108,24 +1108,42 @@ object Store {
         }
     }
 
-    fun loadNotices() = io {
+    /**
+     * 通知拉取游标。portal 侧 id 单调递增，所以默认按游标增量取 —— 原来每次
+     * `since=0` 全量重传 + 整表重建，事件板每 5s 刷一次全是白刷。
+     * portal 重启后序号归零，用 `latest < 游标` 判定，退回一次全量。
+     */
+    private var noticeCursor = 0L
+
+    fun loadNotices(full: Boolean = false) = io {
         runCatching {
-            val res = Hub.call("notify.list", Proto.obj("since" to 0))
+            val since = if (full) 0L else noticeCursor
+            val res = Hub.call("notify.list", Proto.obj("since" to since))
             val d = Proto.obj(res, "d") ?: return@runCatching
+            val items = Proto.arr(d, "items") ?: return@runCatching
+            val latest = Proto.long(d, "latest")
             withMain {
-                notices.clear()
-                Proto.arr(d, "items")?.forEach { el ->
-                    val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+                val rewound = since > 0L && latest < noticeCursor
+                if (since == 0L || rewound) notices.clear()
+                val seen = notices.mapTo(HashSet()) { it.id }
+                for (el in items) {
+                    val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+                    val id = Proto.str(o, "id", "p${o.hashCode()}")
+                    if (id in seen) continue
                     notices.add(
                         0,
                         Notice(
-                            Proto.str(o, "id", "p${o.hashCode()}"),
+                            id,
                             Proto.str(o, "title", "mcca"),
                             Proto.str(o, "body"),
                             Proto.long(o, "at"),
+                            // kind 丢了的话任务播报会被当成人工条目上板（原来只取前 4 个字段）
+                            Proto.str(o, "sessionId"),
+                            Proto.str(o, "kind"),
                         ),
                     )
                 }
+                noticeCursor = if (since == 0L || rewound) latest else maxOf(noticeCursor, latest)
             }
         }
     }

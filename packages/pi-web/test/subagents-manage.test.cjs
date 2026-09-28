@@ -31,8 +31,18 @@ test("effective list includes builtin roles", () => {
     assert.ok(names.includes(name), name);
   }
   const worker = subagents.effective().find((agent) => agent.name === "worker");
-  assert.equal(worker.source, "builtin");
-  assert.equal(worker.scope, "user");
+  assert.equal(worker.source, "project");
+  assert.equal(worker.scope, "project");
+});
+
+test("project roles declare no tool allowlist, so they inherit the parent's tools", () => {
+  for (const name of ["delegate", "oracle", "researcher", "reviewer", "scout", "worker"]) {
+    const agent = subagents.effective().find((item) => item.name === name);
+    assert.equal(agent.source, "project", name + " must win over the builtin role");
+    // tools 归一化成 []：上游只在 frontmatter 写了 tools: 时才生成白名单，
+    // 省略它 = 子代理拿到父会话的全部内置工具，不锁职能。
+    assert.deepEqual(agent.tools, [], name + " must not carry a tool allowlist");
+  }
 });
 
 test("create/update/disable in a temp PI_CODING_AGENT_DIR", async () => {

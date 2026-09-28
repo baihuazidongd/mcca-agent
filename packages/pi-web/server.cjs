@@ -532,13 +532,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", () => {
   const addr = server.address();
   console.log(`pi-web → http://127.0.0.1:${addr.port}`);
-  // 延迟预热：不要在页面刚打开时抢占事件循环。MCP/插件装载可能很慢，
-  // 先让 /api/workspaces 和静态页面响应，空闲后再预热首个会话。
-  setTimeout(() => {
-    const t0 = Date.now();
-    bridge
-      .create({ warmup: true })
-      .then(() => console.log(`[pi-web] warmup complete in ${Date.now() - t0}ms`))
-      .catch((error) => console.error("[pi-web] warmup failed:", error instanceof Error ? error.message : String(error)));
-  }, 8000).unref?.();
+  // 不在启动期自动创建会话。完整会话预热会加载 MCP/插件，可能占用事件循环数十秒；此前它会让页面初始化请求超过前端 20 秒的超时。用户真正打开或新建会话时再按需加载，保证门户启动后先能响应工作区、模型和会话列表。
 });

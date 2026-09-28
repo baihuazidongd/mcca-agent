@@ -56,7 +56,7 @@ test("an idle session stays out of the running list and a live terminal counts",
     }),
     terminals: [
       { id: "t1", agent: "hermes-web", title: "Hermes Agent", cwd: "D:\\dshpi", exited: null },
-      { id: "c1", agent: "codex-cli", title: "Codex", cwd: "D:\\dshpi", exited: null },
+      { id: "c1", agent: "codex-web", title: "Codex", cwd: "D:\\dshpi", exited: null },
     ],
   });
   assert.deepEqual(snap.running.map((row) => row.id).sort(), ["c1", "p2", "t1"]);

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "MCCA 个人浏览器连接",
+  "version": "0.1.0",
+  "description": "将你明确允许的标签页连接到本机 MCCA 工作台。",
+  "minimum_chrome_version": "118",
+  "permissions": ["debugger", "activeTab", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html" }
+}

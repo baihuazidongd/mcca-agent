@@ -1,4 +1,4 @@
-(function () {
+(async function () {
   "use strict";
 
   const { useState, useEffect, useCallback, useRef } = React;
@@ -1250,7 +1250,7 @@
       tick();
       return () => { alive = false; clearTimeout(timer); };
     }, [active, load]);
-    const groups = { "pi-web": "pi / 工具", "codex-cli": "Codex", "openhands-web": "OpenHands", "grok-web": "Grok Build", "hermes-web": "Hermes Agent", mobile: "手机桥接", canvas: "画布", dsh: "dsh", desktop: "桌面界面", portal: "门户" };
+    const groups = { "pi-web": "pi / 工具", "codex-web": "Codex", "openhands-web": "OpenHands", "grok-web": "Grok Build", "hermes-web": "Hermes Agent", mobile: "手机桥接", canvas: "画布", dsh: "dsh", desktop: "桌面界面", portal: "门户" };
     const visible = (data?.processes || []).filter((p) => !/^conhost(\.exe)?$/i.test(p.name || "") && !/^conhost(\.exe)?$/i.test(p.label || ""));
     const rows = visible.filter((p) => `${p.name} ${p.label} ${p.detail || ""} ${p.pid} ${groups[p.group] || p.group}`.toLowerCase().includes(filter.toLowerCase()))
       .sort((a, b) => (b[sort] || 0) - (a[sort] || 0) || a.pid - b.pid);
@@ -1409,7 +1409,10 @@
 
   // ── Process cards ────────────────────────────────────────────────
 
-  function ProcessCard({ agent, label, status, installed, cliCount, update, updateBusy, onStart, onStop, onRestart, onInstall, onUninstall, onCheckUpdate, onResident }) {
+  // `web` 标记：既有网页后端、又保留命令行的服务（Hermes Agent 的 dashboard）。
+  // 这类服务的主状态是进程（启动/停止/pid:端口），命令行只是附带的次要入口；
+  // 纯命令行（codex）不传这个标记，一切照旧。
+  function ProcessCard({ agent, label, status, installed, cliCount, update, updateBusy, web, onStart, onStop, onRestart, onInstall, onUninstall, onCheckUpdate, onResident, onTerminal }) {
     const [showLog, setShowLog] = useState(false);
     const [armed, setArmed] = useState(false);
     useEffect(() => {
@@ -1421,7 +1424,9 @@
     // 不能让整页崩掉——之前 `status.port` 直接抛错 = 整个壳白屏。
     const info = status || {};
     const present = installed !== false;
-    const running = Boolean(info.running) || (Boolean(info.cli) && cliCount > 0);
+    // 命令行在这里的含义是「没有常驻后端，交互全在本页终端里」。
+    const cliOnly = Boolean(info.cli) && !web;
+    const running = Boolean(info.running) || (cliOnly && cliCount > 0);
     const actions = [];
     if (armed && present) {
       actions.push(h("button", {
@@ -1435,11 +1440,14 @@
       if (running) actions.push(h("button", { className: "proc-btn stop", onClick: onStop }, "停止"));
     } else {
       actions.push(h("button", { className: "proc-btn", onClick: () => setShowLog(!showLog) }, showLog ? "收起日志" : "运行日志"));
-      if (info.cli) actions.push(h("button", { className: "proc-btn primary", onClick: onStart }, "打开终端"));
+      if (cliOnly) actions.push(h("button", { className: "proc-btn primary", onClick: onStart }, "打开终端"));
       else if (!running) actions.push(h("button", { className: "proc-btn primary", onClick: onStart }, "启动"));
       actions.push(h("button", { className: "proc-btn", onClick: onRestart }, "重启"));
       actions.push(h("button", { className: "proc-btn stop", onClick: onStop }, "停止"));
-      if (onResident && !info.cli) {
+      if (web && info.cli) {
+        actions.push(h("button", { className: "proc-btn", title: "在门户里另开一个命令行终端", onClick: onTerminal }, "打开终端"));
+      }
+      if (onResident && !cliOnly) {
         const on = Boolean(info.resident);
         actions.push(h("button", {
           className: "proc-btn" + (on ? " primary" : ""),
@@ -1477,14 +1485,14 @@
           h(
             "span",
             { className: "proc-state" + (running ? " ok" : "") },
-            !present && !running ? "未安装" : info.cli ? "命令行" : running ? "运行中" : "已停止",
+            !present && !running ? "未安装" : cliOnly ? "命令行" : running ? "运行中" : "已停止",
           ),
           h(
             "span",
             { className: "proc-detail" },
             armed
               ? "再确认一次。只移出列表，不删程序，之后可以安装回来"
-              : info.cli
+              : cliOnly
               ? (cliCount > 0 ? `本页已有 ${cliCount} 个终端` : "在本页终端里运行")
               : !present
               ? "已移出列表。点安装加回来"
@@ -1660,8 +1668,8 @@
         servers.length === 0
           ? h("div", { className: "empty-hint" }, "还没有 MCP 服务器 — 点「添加」注册一个")
           : servers.map((s) => {
-              const dsOff = Boolean(s.disabledDs);
-              const piOff = Boolean(s.disabledPi);
+              const dsOff = Boolean(s.shared ? s.disabled : s.disabledDs);
+              const piOff = Boolean(s.shared ? s.disabled : s.disabledPi);
               return h(
                 "div",
                 { className: "card" + (dsOff && piOff ? " is-off" : ""), key: s.serverName },
@@ -1673,6 +1681,7 @@
                     { className: "card-name" },
                     s.serverName,
                     h("span", { className: "badge kind-mcp" }, s.transport),
+                    s.shared && h("span", { className: "badge kind-mcp" }, "所有 IDE 共享"),
                   ),
                   h(
                     "div",
@@ -1683,8 +1692,8 @@
                 h(
                   "div",
                   { className: "switches" },
-                  h(AgentSwitch, { agent: "ds", label: "dsh", on: !dsOff, onChange: () => onToggle(s, "ds", dsOff, toast) }),
-                  h(AgentSwitch, { agent: "pi", label: "pi", on: !piOff, onChange: () => onToggle(s, "pi", piOff, toast) }),
+                  h(AgentSwitch, { agent: "ds", label: s.shared ? "全部 IDE" : "dsh", on: !dsOff, onChange: () => onToggle(s, "ds", dsOff, toast) }),
+                  !s.shared && h(AgentSwitch, { agent: "pi", label: "pi", on: !piOff, onChange: () => onToggle(s, "pi", piOff, toast) }),
                 ),
                 h(
                   "button",
@@ -1948,13 +1957,36 @@
     );
   }
 
-  const IDE_IDS = ["dsh", "pi"];
-  const CLI_IDS = ["codex", "openhands", "grok", "hermes"];
-  const CLI_NAME = { codex: "Codex", openhands: "OpenHands", grok: "Grok Build", hermes: "Hermes Agent" };
-
+  let runtimeRows;
+  try {
+    const response = await fetch("/api/runtimes");
+    if (response.status === 404) {
+      const legacy = await fetch("/api/status", { cache: "no-store" });
+      if (!legacy.ok) throw new Error("HTTP " + legacy.status);
+      const state = await legacy.json();
+      if (!Array.isArray(state.agents)) throw new Error("Invalid legacy runtime list");
+      const pages = { "pi-web": "pi", "codex-web": "codex", "grok-web": "grok", "hermes-web": "hermes", "openhands-web": "openhands", dsh: "dsh", canvas: "canvas" };
+      runtimeRows = state.agents.map(r => ({ id: r.agent, label: r.label || r.agent, port: r.port, page: pages[r.agent], group: ["dsh", "pi-web"].includes(r.agent) ? "ide" : "cli", capabilities: [] }));
+      const notice = document.createElement("div"); notice.setAttribute("role", "status");
+      notice.textContent = "门户后台尚未更新，已加载兼容界面。更新门户后台后即可使用新版工作台。";
+      notice.style.cssText = "padding:10px 18px;background:#483b20;color:#fff"; document.body.prepend(notice);
+    } else {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      runtimeRows = (await response.json()).runtimes;
+    }
+    if (!Array.isArray(runtimeRows)) throw new Error("Invalid runtime registry");
+  } catch (error) {
+    document.getElementById("root").textContent = "无法读取 IDE 清单，请刷新或重启门户：" + error.message;
+    return;
+  }
+  const IDE_IDS = runtimeRows.filter(r => r.page && r.group === "ide").map(r => r.page);
+  const CLI_IDS = runtimeRows.filter(r => r.page && r.group === "cli").map(r => r.page);
+  const CLI_NAME = Object.fromEntries(runtimeRows.filter(r => r.page).map(r => [r.page, r.label]));
+  const PAGE_RUNTIME = Object.fromEntries(runtimeRows.filter(r => r.page).map(r => [r.page, r]));
+  const WEB_PANEL_IDS = CLI_IDS;
   function pageFromHash(hash) {
     const id = String(hash || "").replace(/^#\//, "");
-    if (["board", "resources", "manage", "usage", "canvas"].concat(IDE_IDS, CLI_IDS).includes(id)) return id;
+    if (["board", "resources", "manage", "usage", "canvas", "workbench"].concat(IDE_IDS, CLI_IDS).includes(id)) return id;
     return "board";
   }
 
@@ -2118,7 +2150,7 @@
     const [filter, setFilter] = useState("");
     const [err, setErr] = useState("");
     const [busyId, setBusyId] = useState("");
-    const agent = { openhands: "openhands-web", grok: "grok-web", hermes: "hermes-web" }[tool];
+    const agent = { codex: "codex-web", openhands: "openhands-web", grok: "grok-web", hermes: "hermes-web" }[tool];
 
     useEffect(() => {
       let alive = true;
@@ -2678,7 +2710,7 @@
       // the canvas (ComfyUI) instance, and future additions won't shift indexes.
       const byAgent = {};
       for (const a of data.agents || []) byAgent[a.agent] = a;
-      setStatus({ dsh: byAgent.dsh, pi: byAgent["pi-web"], codex: byAgent["codex-cli"], openhands: byAgent["openhands-web"], grok: byAgent["grok-web"], hermes: byAgent["hermes-web"], canvas: byAgent.canvas, mobile: byAgent.mobile });
+      setStatus(Object.fromEntries((data.agents || []).map(a => [a.page || a.agent, a])));
     }, []);
 
     const loadConfig = useCallback(async () => {
@@ -2851,7 +2883,7 @@
     }
 
     function agentKey(agent) {
-      const backend = { dsh: "dsh", pi: "pi-web", codex: "codex-cli", openhands: "openhands-web", grok: "grok-web", hermes: "hermes-web", canvas: "canvas" }[agent] || agent;
+      const backend = PAGE_RUNTIME[agent]?.id || agent;
       return status[agent]?.agent || backend;
     }
 
@@ -2886,11 +2918,11 @@
       }));
     }
 
-    async function start(agent, cwd, resume) {
+    async function start(agent, cwd, resume, options = {}) {
       const body = {};
-      // grok / openhands 的网页服务可以一直开着。这里开的是旁边的命令行，
-      // 不带这个标记会被当成再启一遍网页，弹出 already running。
-      if (CLI_IDS.includes(agent)) body.terminal = true;
+      // 页签默认都是网页面板，只有显式要终端时（管理页的「打开终端」、新建命令行
+      // 窗口）才带这个标记，否则会被当成再启一遍网页，弹出 already running。
+      if (options.terminal) body.terminal = true;
       if (typeof cwd === "string" && cwd) body.cwd = cwd;
       if (resume) body.resume = resume;
       const hasBody = Object.keys(body).length > 0;
@@ -2922,9 +2954,11 @@
       return active?.cwd || cliCwd.current[agent] || "";
     }
 
+    // 这两个都是命令行屏里的动作，永远要终端——hermes 的页签默认走 web 面板，
+    // 不显式带这个标记会被当成「再启一遍网页」。
     function newCliWindow(agent) {
       const cwd = cwdFor(agent);
-      return start(agent, cwd);
+      return start(agent, cwd, "", { terminal: true });
     }
 
     async function newCliWorkspace(agent) {
@@ -2945,7 +2979,7 @@
 
     function resumeCli(agent, row) {
       if (!row || !row.id) return;
-      return start(agent, row.cwd || cwdFor(agent), row.id);
+      return start(agent, row.cwd || cwdFor(agent), row.id, { terminal: true });
     }
 
     async function stop(agent) {
@@ -3143,7 +3177,7 @@
       (async () => {
         for (const agent of pending) {
           if (status[agent] && status[agent].installed === false) continue;
-          const key = { dsh: "dsh", pi: "pi-web", codex: "codex-cli", openhands: "openhands-web", grok: "grok-web", hermes: "hermes-web", canvas: "canvas" }[agent] || agent;
+          const key = { dsh: "dsh", pi: "pi-web", codex: "codex-web", openhands: "openhands-web", grok: "grok-web", hermes: "hermes-web", canvas: "canvas" }[agent] || agent;
           const r = await api(`/api/process/${status[agent]?.agent || key}/delete`, { method: "POST" });
           if (!r || !r.ok) {
             pushedRemoves.current = false;
@@ -3187,7 +3221,7 @@
         body: JSON.stringify({ agent, enabled }),
       });
       if (r.ok) {
-        toast(`${s.serverName} 已在 ${agent === "ds" ? "dsh" : "pi"} 侧${enabled ? "启用" : "停用"}`);
+        toast(`${s.serverName} 已在 ${s.shared ? "全部 IDE" : agent === "ds" ? "dsh" : "pi"} 侧${enabled ? "启用" : "停用"}`);
         loadConfig();
       } else toast(r.error || "操作失败");
     }
@@ -3216,15 +3250,15 @@
       } else toast(r.error || "删除失败");
     }
 
-    // Both agent iframes stay mounted for the whole portal session; switching
-    // tabs only toggles their visibility (see AgentFrame / .agent-frames CSS).
+    // Agent iframes stay mounted for the whole portal session; switching tabs
+    // only toggles their visibility (see AgentFrame / .agent-frames CSS).
     // NOTE: this is a child list — the App return below owns the .content div.
     const content = [
+      tab === "workbench" ? h("iframe", { key: "workbench", src: "/workbench.html", title: "工作台", style: { position: "absolute", inset: 0, width: "100%", height: "100%", border: 0, zIndex: 5 } }) : null,
       h(
         "div",
         { key: "frames", className: "agent-frames" },
-        h(AgentFrame, { key: "dsh", agent: "dsh", status: status.dsh, onStart: () => start("dsh"), hidden: tab !== "dsh" }),
-        h(AgentFrame, { key: "pi", agent: "pi", status: status.pi, onStart: () => start("pi"), hidden: tab !== "pi" }),
+        ...IDE_IDS.concat(CLI_IDS).map(id => h(AgentFrame, { key: id, agent: id, status: status[id], onStart: () => start(id), hidden: tab !== id })),
       ),
       h(
         "div",
@@ -3254,10 +3288,10 @@
               "div",
               { className: "mg-group" },
               h("div", { className: "mg-group-hd" }, h("h3", null, "CLI")),
-              h(ProcessCard, { agent: "codex", label: "Codex", status: status.codex, cliCount: cli.sessions.filter((item) => item.agent === "codex").length, installed: instanceOn("codex"), update: updateFor("codex"), updateBusy, onStart: () => start("codex"), onStop: () => stop("codex"), onRestart: () => restart("codex"), onInstall: () => install("codex", "Codex"), onUninstall: () => removeInstance("codex", "Codex"), onCheckUpdate: checkOne }),
-              h(ProcessCard, { agent: "openhands", label: "OpenHands", status: status.openhands, cliCount: cli.sessions.filter((item) => item.agent === "openhands").length, installed: instanceOn("openhands"), update: updateFor("openhands"), updateBusy, onStart: () => start("openhands"), onStop: () => stop("openhands"), onRestart: () => restart("openhands"), onInstall: () => install("openhands", "OpenHands"), onUninstall: () => removeInstance("openhands", "OpenHands"), onCheckUpdate: checkOne }),
-              h(ProcessCard, { agent: "grok", label: "Grok Build", status: status.grok, cliCount: cli.sessions.filter((item) => item.agent === "grok").length, installed: instanceOn("grok"), update: updateFor("grok"), updateBusy, onStart: () => start("grok"), onStop: () => stop("grok"), onRestart: () => restart("grok"), onInstall: () => install("grok", "Grok Build"), onUninstall: () => removeInstance("grok", "Grok Build"), onCheckUpdate: checkOne }),
-              h(ProcessCard, { agent: "hermes", label: "Hermes Agent", status: status.hermes, cliCount: cli.sessions.filter((item) => item.agent === "hermes").length, installed: instanceOn("hermes"), update: updateFor("hermes"), updateBusy, onStart: () => start("hermes"), onStop: () => stop("hermes"), onRestart: () => restart("hermes"), onInstall: () => install("hermes", "Hermes Agent"), onUninstall: () => removeInstance("hermes", "Hermes Agent"), onCheckUpdate: checkOne }),
+              h(ProcessCard, { agent: "codex", label: "Codex", status: status.codex, cliCount: cli.sessions.filter((item) => item.agent === "codex").length, installed: instanceOn("codex"), update: updateFor("codex"), updateBusy, web: true, onStart: () => start("codex"), onStop: () => stop("codex"), onRestart: () => restart("codex"), onTerminal: () => start("codex", "", "", { terminal: true }), onInstall: () => install("codex", "Codex"), onUninstall: () => removeInstance("codex", "Codex"), onResident: (on) => resident("codex", "Codex", on), onCheckUpdate: checkOne }),
+              h(ProcessCard, { agent: "openhands", label: "OpenHands", status: status.openhands, cliCount: cli.sessions.filter((item) => item.agent === "openhands").length, installed: instanceOn("openhands"), update: updateFor("openhands"), updateBusy, web: true, onStart: () => start("openhands"), onStop: () => stop("openhands"), onRestart: () => restart("openhands"), onTerminal: () => start("openhands", "", "", { terminal: true }), onInstall: () => install("openhands", "OpenHands"), onUninstall: () => removeInstance("openhands", "OpenHands"), onResident: (on) => resident("openhands", "OpenHands", on), onCheckUpdate: checkOne }),
+              h(ProcessCard, { agent: "grok", label: "Grok Build", status: status.grok, cliCount: cli.sessions.filter((item) => item.agent === "grok").length, installed: instanceOn("grok"), update: updateFor("grok"), updateBusy, web: true, onStart: () => start("grok"), onStop: () => stop("grok"), onRestart: () => restart("grok"), onTerminal: () => start("grok", "", "", { terminal: true }), onInstall: () => install("grok", "Grok Build"), onUninstall: () => removeInstance("grok", "Grok Build"), onResident: (on) => resident("grok", "Grok Build", on), onCheckUpdate: checkOne }),
+              h(ProcessCard, { agent: "hermes", label: "Hermes Agent", status: status.hermes, cliCount: cli.sessions.filter((item) => item.agent === "hermes").length, installed: instanceOn("hermes"), update: updateFor("hermes"), updateBusy, web: true, onStart: () => start("hermes"), onStop: () => stop("hermes"), onRestart: () => restart("hermes"), onTerminal: () => start("hermes", "", "", { terminal: true }), onInstall: () => install("hermes", "Hermes Agent"), onUninstall: () => removeInstance("hermes", "Hermes Agent"), onCheckUpdate: checkOne }),
             ),
             h(
               "div",
@@ -3338,9 +3372,16 @@
     const cliList = CLI_IDS.filter((id) => instanceOn(id));
     const tabs = [
       { id: "board", label: "事件板", icon: ICONS.list },
-      ...ideList.map((id) => ({ id, label: id, icon: ICONS.terminal, running: Boolean(status[id]?.running) })),
-      ...cliList.map((id) => ({ id, label: CLI_NAME[id] || id, icon: ICONS.code, running: cli.sessions.some((item) => item.agent === id) })),
+      ...ideList.map((id) => ({ id, label: CLI_NAME[id] || id, icon: ICONS.terminal, running: Boolean(status[id]?.running) })),
+      // hermes 跑的是网页后端，运行状态看进程；其余 CLI 看有没有终端会话。
+      ...cliList.map((id) => ({
+        id,
+        label: CLI_NAME[id] || id,
+        icon: ICONS.code,
+        running: id === "hermes" ? Boolean(status.hermes?.running) : cli.sessions.some((item) => item.agent === id),
+      })),
       instanceOn("canvas") ? { id: "canvas", label: "画布", icon: ICONS.canvas, running: Boolean(status.canvas?.running) } : null,
+      { id: "workbench", label: "工作台", icon: ICONS.code },
       { id: "manage", label: "管理", icon: ICONS.manage },
       { id: "usage", label: "消耗", icon: ICONS.chart },
       { id: "resources", label: "资源", icon: ICONS.activity },
@@ -3516,7 +3557,9 @@
         "div",
         { className: "content" + (["manage", "canvas", "board", "usage", "resources"].concat(CLI_IDS).includes(tab) ? " has-overlay" : "") },
         content,
-        CLI_IDS.includes(tab)
+        // 页签本身是网页面板（常驻 iframe）；只有用户主动开了终端会话时，才把
+        // 命令行屏盖上来。
+        WEB_PANEL_IDS.includes(tab) && cli.sessions.some((item) => item.agent === tab)
           ? h(CliScreen, {
               tool: tab,
               sessions: cli.sessions,
@@ -3540,11 +3583,12 @@
   // checks first), but the portal marks them "running" as soon as the pid is
   // spawned — an iframe mounted in that window lands on a WebView2 error page
   // and never retries. Gate the iframe on a reachable probe instead.
-  function useAgentReachable(port, resetKey) {
+  function useAgentReachable(port, resetKey, enabled) {
     const [ready, setReady] = useState(false);
     useEffect(() => {
       let alive = true;
       setReady(false);
+      if (!enabled || !port) return () => { alive = false; };
       const url = `http://127.0.0.1:${port}/`;
       (async () => {
         while (alive) {
@@ -3560,7 +3604,7 @@
       return () => {
         alive = false;
       };
-    }, [port, resetKey]);
+    }, [port, resetKey, enabled]);
     return ready;
   }
 
@@ -3571,16 +3615,16 @@
     // Fallback ports mirror the portal server's AGENTS defaults (3081 for dsh).
     // Never point at :3080 — that's the user's separate dsh instance from the
     // external workspace, not the one this portal supervises.
-    const port = status?.port || ({ pi: 3458, openhands: 3460, grok: 3461, hermes: 3462, dsh: 3081 }[agent] || 3081);
+    const port = status?.port || PAGE_RUNTIME[agent]?.port;
     const [starting, setStarting] = useState(false);
     const cls = "agent-frame" + (hidden ? " is-hidden" : "");
     const shell = { className: cls, inert: hidden ? "" : undefined, "aria-hidden": hidden ? "true" : undefined };
     // Hooks must run unconditionally (before any early return) — the reach
     // probe resets whenever the agent process identity changes.
     const key = `${status?.pid ?? "down"}-${status?.startedAt || ""}`;
-    const ready = useAgentReachable(port, key);
+    const ready = useAgentReachable(port, key, Boolean(status?.running) || starting);
     // 进程还没起来时也先挂上页面。端口一通，iframe 已经在后台载完。
-    const frame = h("iframe", { key, src: `http://127.0.0.1:${port}`, title: agent });
+    const frame = h("iframe", { key, src: status?.launchUrl || `http://127.0.0.1:${port}`, title: agent });
     if (!status?.running) {
       return h(
         "div",
@@ -3588,7 +3632,7 @@
         h(
           "div",
           { className: "hero-empty" },
-          h("div", { className: "hero-mark", "aria-hidden": true }, agent === "pi" ? "π" : agent === "openhands" ? "OH" : agent === "grok" ? "Gk" : agent === "hermes" ? "爱" : ">_"),
+          h("div", { className: "hero-mark", "aria-hidden": true }, agent === "pi" ? "π" : agent === "openhands" ? "OH" : agent === "codex" ? "Cx" : agent === "grok" ? "Gk" : agent === "hermes" ? "爱" : ">_"),
           h("div", { className: "hero-title" }, `${agent} 未运行`),
           h("div", { className: "hero-desc" }, "点击下方按钮直接启动"),
           h(

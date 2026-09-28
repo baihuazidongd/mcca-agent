@@ -2,7 +2,7 @@
 
 /** 事件板任务监控要问的网页会话服务。命令行终端另计。 */
 const CLI_AGENT = {
-  "codex-cli": "codex",
+  "codex-web": "codex",
   "openhands-web": "openhands",
   "grok-web": "grok",
   "hermes-web": "hermes",

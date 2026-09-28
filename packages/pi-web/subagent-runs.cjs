@@ -10,6 +10,87 @@ const MANAGEMENT_ACTIONS = new Set(["list", "get", "models", "create", "update",
 // disk. If it is still "working" after this long, a live run is implausible
 // (foreground launches are capped at 30 min), so it is an orphan.
 const ORPHAN_MAX_AGE_MS = 60 * 60 * 1000;
+// 与上游 stale-run-reconciler 同阈值：PID 活着但状态一天没动，说明这个 PID
+// 可能已经被别的进程复用，归属无法验证，才判死。
+const STALE_ALIVE_PID_MS = 24 * 60 * 60 * 1000;
+
+// 上游把「一次输出都没有」判成失败，但这不是代理拒绝干活；角色名不存在也不是
+// 权限不够。这几类都要单独标出来，人看一眼就知道是降并发重跑、改角色名还是删白名单，
+// 而不是以为子代理被锁了职能。类别取自她自己的 110 条 run 的实际死法。
+const FAILURE_CLASSES = [
+  { key: "empty_output", label: "空返回", hint: "模型这一趟一个字都没出，多半是并发打满或冷启动。降 fan-out 并发重跑，或给这个 agent 配 fallbackModels。" },
+  { key: "unknown_agent", label: "角色名不存在", hint: "派出来的角色名在 agent 列表里没有。用内置角色名（worker/reviewer/…），或在 .pi/agents 里建同名角色。" },
+  { key: "timeout", label: "超时", hint: "子代理跑满了单次时限被砍掉。拆小任务或提高该角色的时限。" },
+  // 派它的进程没了或临时目录被回收：这一条不会再有结果，重跑就行。
+  // 不标出来，它和「代理拒绝干活」在界面上是同一个词。
+  { key: "runner_gone", label: "进程已退出", hint: "派出它的进程已退出或临时目录被回收，这条 run 不会再有结果。直接重跑这个子任务。" },
+  // 内置 researcher 就死在这条上：它的 tools 白名单点名了 web_search，而子会话没接扩展。
+  { key: "missing_tools", label: "工具不可用", hint: "角色的 tools 白名单点名了子会话里没有的工具（web_search 这类来自扩展或 MCP）。删掉该角色的 tools 让它继承父会话，或把对应扩展接上。" },
+  { key: "acceptance_rejected", label: "验收被拒", hint: "子代理出了东西，但没过该角色的验收条件（多半是报告里没附上它跑过的命令与输出）。让它把证据写进报告，或放宽该角色的验收。" },
+  { key: "provider_error", label: "上游拒绝", hint: "服务商把这个请求打回来了（鉴权、参数或内容审核）。先在 pi 里用同一个模型手动跑一次：pi 能跑就是我们的配置问题，别记成模型不行。" },
+];
+
+const FAILURE_BY_KEY = new Map(FAILURE_CLASSES.map((item) => [item.key, item]));
+
+function classifyFailure(error) {
+  const text = String(error || "");
+  if (!text) return null;
+  if (/produced no output|no output \(possible model cold-start/i.test(text)) return FAILURE_BY_KEY.get("empty_output");
+  if (/(?:^|\n)\s*Unknown agent:/i.test(text)) return FAILURE_BY_KEY.get("unknown_agent");
+  if (/timed out after \d+ms/i.test(text)) return FAILURE_BY_KEY.get("timeout");
+  if (/Orphaned run|Async runner process \d+ (?:exited|has a live PID)/i.test(text)) return FAILURE_BY_KEY.get("runner_gone");
+  if (/requested unavailable child tools/i.test(text)) return FAILURE_BY_KEY.get("missing_tools");
+  if (/Acceptance rejected:/i.test(text)) return FAILURE_BY_KEY.get("acceptance_rejected");
+  // 状态码要带上下文才认：光一个 401 会撞上产物路径和调用 id 里的十六进制串。
+  if (/invalid_request_error|Upstream request failed|Error from provider|api key|token expired|invalid key|(?:\b(?:http|status|code)[^0-9]{0,4}40[13]\b|\b40[13]\s*[:])/i.test(text)) return FAILURE_BY_KEY.get("provider_error");
+  return null;
+}
+
+// 落盘的旧快照里存的是改动前写的 run，没有 failClass：分类只依赖 error 文本，
+// restore 时重算一次，老数据也一样能标出「空返回」而不是干巴巴的「失败」。
+function applyFailureClass(run) {
+  if (run.status === "failed") {
+    const failure = classifyFailure(run.error);
+    run.failClass = failure ? failure.key : "";
+  } else if (run.failClass) {
+    delete run.failClass;
+  }
+  return run;
+}
+
+function pidLiveness(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return "unknown";
+  try {
+    process.kill(pid, 0);
+    return "alive";
+  } catch (error) {
+    return error && error.code === "ESRCH" ? "dead" : "unknown";
+  }
+}
+
+/**
+ * 落盘的 status.json 说这个 run 其实已经不会再动了：runner 进程已经退出，或者
+ * 归属无法验证的僵死。返回判死原因，返回 null 表示还在活着。
+ * 上游的 stale-run-reconciler 会把这些写回 status.json，但它只在父会话活着、
+ * 且走 RPC/tracker 时才跑；pi-web 直接读文件，永远等不到那次修复。
+ */
+function runnerVerdict(status, now = Date.now(), liveness = pidLiveness) {
+  if (!status || typeof status !== "object") return null;
+  if (statusOf(status.state) !== "working") return null;
+  const pid = status.pid;
+  // 上游没有 pid 就不判（reconcileAsyncRun 同样要求 typeof pid === "number"）：
+  // 没有进程可查，任何「死」的结论都只是猜。
+  if (typeof pid !== "number") return null;
+  const alive = liveness(pid);
+  if (alive === "dead") {
+    return `Async runner process ${pid} exited or disappeared before writing a result.`;
+  }
+  const last = Number(status.lastUpdate) || Number(status.startedAt) || 0;
+  if (last && now - last > STALE_ALIVE_PID_MS) {
+    return `Async runner process ${pid} has a live PID, but its status has not updated for ${now - last}ms; ownership cannot be verified.`;
+  }
+  return null;
+}
 
 function clip(value, limit = 16000) {
   return typeof value === "string" ? value.slice(0, limit) : "";
@@ -149,6 +230,11 @@ class SubagentRuns {
     this.runs = new Map();
     this.calls = new Map();
     this.sources = new Map();
+    // runId -> 派它出来的那次 subagent 工具调用 id。
+    // 一次 workflow 扇出只有一个工具调用、却有 N 个子代理，而这些子代理大多是
+    // refreshFiles() 从 async status.json 里发现的——那条路径拿不到 callId。
+    // 没有它，前端就没法把子对话挂回主对话里它被派出来的那一行下面。
+    this.runCalls = new Map();
     this.lastError = null;
     this.restore();
     if (this.refreshFiles(false)) this.save();
@@ -160,8 +246,11 @@ class SubagentRuns {
       if (saved.sessionId !== this.sessionId || !Array.isArray(saved.runs)) throw new Error("Invalid run snapshot");
       for (const run of saved.runs) {
         if (run.status === "working" && !run.background) run.status = "unknown";
-        this.runs.set(run.id, run);
+        this.runs.set(run.id, applyFailureClass(run));
         if (run.asyncDir) this.sources.set(run.runId, run.asyncDir);
+        // 重启后 this.calls 是空的，锚点只能从落盘的 run 上把 runId->callId 找回来。
+        // run 不会被淘汰，所以每个 runId 至少有一条带 callId 的落盘记录可复原。
+        if (run.callId && run.runId && !this.runCalls.has(run.runId)) this.runCalls.set(run.runId, run.callId);
       }
     } catch (error) {
       if (error.code !== "ENOENT") this.lastError = error.message;
@@ -195,6 +284,12 @@ class SubagentRuns {
     run.id = id;
     run.runId = String(input.runId);
     run.index = index;
+    // 同一次扇出的兄弟 run 已经带锚点就补上：refreshFiles 从 status.json 建 run
+    // 的那条路径自己拿不到 callId，不补就永远挂不回主对话。
+    if (!run.callId) {
+      const anchor = this.runCalls.get(run.runId);
+      if (anchor) run.callId = anchor;
+    }
     run.agent = clip(run.agent, 128);
     run.task = clip(run.task);
     run.result = clip(run.result);
@@ -204,6 +299,7 @@ class SubagentRuns {
       run.endedAt = run.endedAt || Date.now();
       run.stopRequested = false;
     }
+    applyFailureClass(run);
     this.runs.set(id, run);
     if (run.asyncDir) this.sources.set(run.runId, run.asyncDir);
     return run;
@@ -232,6 +328,7 @@ class SubagentRuns {
       if (final) this.calls.delete(callId);
       return false;
     }
+    if (!this.runCalls.has(String(runId))) this.runCalls.set(String(runId), callId);
     // A workflow can be rejected by its acceptance gate after the child has
     // already been recorded as working.  The gate does not always emit the
     // normal async-complete event, so close the child here from the tool's
@@ -385,11 +482,24 @@ class SubagentRuns {
     let changed = false;
     for (const [runId, dir] of this.sources) {
       if (!dir) continue;
+      let dirGone = false;
       try {
         const statusFile = path.join(dir, "status.json");
         const data = JSON.parse(fs.readFileSync(statusFile, "utf8"));
         if (data.sessionId && !sameSession(data.sessionId, this.sessionId)) continue;
         if (data.runId && data.runId !== runId) continue;
+        // pi-subagents 把派生它的那次工具调用 id 写进了 status.json。
+        // 进程重启后、以及改动之前落盘的老快照里，扇出的子代理只有这一处锚点可寻；
+        // put() 会拿它补上 run.callId，主对话才挂得回去。
+        // 直接写 runCalls 而不是走 put()：状态没变的 run 不会被 put() 重写，
+        // 老快照里的无锚点 run 就永远修不好。
+        if (data.toolCallId) {
+          const anchor = String(data.toolCallId);
+          if (!this.runCalls.has(String(runId))) this.runCalls.set(String(runId), anchor);
+          for (const run of this.runs.values()) {
+            if (run.runId === String(runId) && !run.callId) { run.callId = anchor; changed = true; }
+          }
+        }
         for (const [offset, item] of (data.steps || []).entries()) {
           if (!item.agent || ["pending", "queued"].includes(item.status)) continue;
           const index = Number.isInteger(item.index) ? item.index : offset;
@@ -416,10 +526,26 @@ class SubagentRuns {
               changed = true;
             }
           }
+        } else {
+          // 状态文件还写着 running，但派它的进程已经死了：这一批 fan-out 子代理
+          // 谁也不会再来更新它们。不判死就永远挂在「工作中」，父对话也等不到回执。
+          const dead = runnerVerdict(data);
+          if (dead) {
+            const now = Date.now();
+            for (const run of this.runs.values()) {
+              if (run.runId !== runId || TERMINAL.has(run.status)) continue;
+              this.put({ ...run, status: "failed", error: run.error || dead, endedAt: run.endedAt || now });
+              changed = true;
+            }
+          }
         }
       } catch (error) {
-        if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) this.lastError = error.message;
+        if (error.code === "ENOENT") dirGone = true;
+        else if (!(error instanceof SyntaxError)) this.lastError = error.message;
       }
+      // 上游会回收已结束 run 的临时目录。目录没了还写着 working，就是这条 run
+      // 再没有可信的数据源——按孤儿处理，不然快照里的老 run 永远收不了口。
+      if (dirGone) changed = this.reconcileOrphans(ORPHAN_MAX_AGE_MS, runId, true) || changed;
     }
     changed = this.reconcileOrphans() || changed;
     changed = changed && before !== JSON.stringify([...this.runs.values()]);
@@ -428,18 +554,23 @@ class SubagentRuns {
   }
 
   /**
-   * Fail runs that can never be reconciled from disk: still "working"/"unknown"
-   * with no async directory, child session, or transcript, and old enough that
-   * a live run is implausible. Prevents a phantom "工作中" row after a child
-   * dies without emitting a terminal event.
+   * Fail runs that can never be reconciled from disk: still "working" and old
+   * enough that a live run is implausible. Two shapes:
+   * - nothing to reconcile from at all (no async dir, no child session);
+   * - sourceGone: the run's async directory was pruned, so even a run that
+   *   still has a child session can never report a terminal state again.
+   * Prevents a phantom "工作中" row after a child dies without a terminal event.
    */
-  reconcileOrphans(maxAgeMs = ORPHAN_MAX_AGE_MS) {
+  reconcileOrphans(maxAgeMs = ORPHAN_MAX_AGE_MS, onlyRunId = null, sourceGone = false) {
     const now = Date.now();
     let changed = false;
     for (const run of this.runs.values()) {
       if (run.status !== "working") continue;
-      if (run.asyncDir || run.sessionFile || run.transcriptPath || run.childSessionId) continue;
-      if (this.sources.get(run.runId)) continue;
+      if (onlyRunId && run.runId !== String(onlyRunId)) continue;
+      if (!sourceGone) {
+        if (run.asyncDir || run.sessionFile || run.transcriptPath || run.childSessionId) continue;
+        if (this.sources.get(run.runId)) continue;
+      }
       const startedAt = run.startedAt || 0;
       if (!startedAt || now - startedAt < maxAgeMs) continue;
       this.put({
@@ -508,7 +639,14 @@ class SubagentRuns {
     return {
       sessionId: this.sessionId,
       agents,
-      runs: runs.map(({ asyncDir, callId, sessionFile, transcriptPath, ...run }) => run),
+      // callId 是子对话挂进父对话的锚点：父转录里那次 subagent 工具调用的
+      // data-call 就是它。剥掉它就只剩按 agent 名字开坞弹模态一条路。
+      // 三个路径字段仍然不发，本地绝对路径不该进浏览器。
+      runs: runs.map(({ asyncDir, sessionFile, transcriptPath, ...run }) => {
+        // 文案在这里出，前端只管渲染：分类规则只有一处，改判定不用两头同步
+        const failure = run.failClass ? classifyFailure(run.error) : null;
+        return failure ? { ...run, failLabel: failure.label, failHint: failure.hint } : run;
+      }),
       error: this.lastError,
     };
   }
@@ -547,6 +685,10 @@ class SubagentRuns {
 module.exports = {
   SubagentRuns,
   statusOf,
+  pidLiveness,
+  runnerVerdict,
+  classifyFailure,
+  FAILURE_CLASSES,
   MANAGEMENT_ACTIONS,
   sameSession,
   idFromSessionFile,

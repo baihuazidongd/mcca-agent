@@ -5,29 +5,20 @@ const path = require("node:path");
 
 // Managed services the portal can show, start, and drop from its list.
 // Delete never removes the program on disk — only this membership.
-const INSTANCE_IDS = ["dsh", "pi-web", "codex-cli", "openhands-web", "grok-web", "hermes-web", "canvas", "mobile"];
-
-const INSTANCE_GROUPS = {
-  dsh: "ide",
-  "pi-web": "ide",
-  "codex-cli": "cli",
-  "openhands-web": "cli",
-  "grok-web": "cli",
-  "hermes-web": "cli",
-  canvas: "extension",
-  mobile: "extension",
-};
-
+const { registry } = require("../runtime-core/registry.cjs");
+const INSTANCE_IDS = registry().all().map(row => row.id);
+const INSTANCE_GROUPS = Object.fromEntries(registry().all().map(row => [row.id, row.group]));
 function defaultInstalled() {
-  return INSTANCE_IDS.slice();
+  return registry().all().filter(row => row.defaultInstalled).map(row => row.id);
 }
 
+// 老配置里 Codex 叫 codex-cli（那时它只有命令行，没有页面）。
 function normalizeInstalled(value) {
   if (!Array.isArray(value)) return null;
-  const known = new Set(INSTANCE_IDS);
+  const known = new Set(registry().all().map(row => row.id));
   const out = [];
   for (const id of value) {
-    const next = id === "codex-web" ? "codex-cli" : id;
+    const next = id === "codex-cli" ? "codex-web" : id;
     if (known.has(next) && !out.includes(next)) out.push(next);
   }
   return out;
@@ -35,10 +26,10 @@ function normalizeInstalled(value) {
 
 function normalizeResident(value) {
   if (!Array.isArray(value)) return [];
-  const known = new Set(INSTANCE_IDS);
+  const known = new Set(registry().all().map(row => row.id));
   const out = [];
   for (const id of value) {
-    const next = id === "codex-web" ? "codex-cli" : id;
+    const next = id === "codex-cli" ? "codex-web" : id;
     if (known.has(next) && !out.includes(next)) out.push(next);
   }
   return out;

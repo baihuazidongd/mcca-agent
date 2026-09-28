@@ -25,6 +25,15 @@ const PORT = Number(process.env.RELAY_PORT) || 8099;
 const HOST = process.env.RELAY_HOST || "0.0.0.0";
 const DEBUG = process.env.RELAY_DEBUG === "1";
 
+// 死链回收：手机被 ROM 冻结、换网或进程被杀时，TCP 常常不会自己关，relay 只等
+// close 事件就会攒下永远读不到数据的幽灵连接（云上实测同时挂过 4 条、内核积压
+// 100KB+，App 的请求被转发到幽灵链路上，表现就是「连着但收不到东西」）。
+// 桌面和 App 都会对应用层 ping 回 pong，所以「最近收到过任何上行帧」就是可靠的
+// 存活信号，不需要加新协议。
+const IDLE_MS = Number(process.env.RELAY_IDLE_MS) || 90_000;
+const SWEEP_MS = Number(process.env.RELAY_SWEEP_MS) || 25_000;
+const MAX_BUFFER = Number(process.env.RELAY_MAX_BUFFER) || 4 * 1024 * 1024;
+
 function log(line) {
   console.log(`[relay] ${new Date().toISOString()} ${line}`);
 }
@@ -79,16 +88,47 @@ function sendToApps(obj) {
   for (const { ws } of apps.values()) send(ws, obj);
 }
 
+/** 桌面链路没了：把它身上在飞的转发请求当场判失败，别让 App 干等到自己的超时。 */
+function failPending(reason) {
+  for (const [gid, route] of pendingReq) {
+    pendingReq.delete(gid);
+    const target = apps.get(String(route.app));
+    if (target) send(target.ws, { t: "res", id: route.id, ok: false, e: reason });
+  }
+}
+
+/** 结束一条桌面链路。close 对半死连接可能永远等不到对端回应，所以补一刀 terminate。 */
+function retireDesktop(record, reason) {
+  if (!record) return;
+  try { record.ws.close(4000, reason); } catch { /* ignore */ }
+  try { record.ws.terminate(); } catch { /* ignore */ }
+  if (desktop === record) {
+    desktop = null;
+    sendToApps({ t: "evt", m: "desktop", d: { online: false } });
+  }
+  failPending("桌面端已断开");
+  log(`desktop retired: ${reason}`);
+}
+
 // ── HTTP 面 ───────────────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
   if (url.pathname === "/health") {
+    const now = Date.now();
     const body = JSON.stringify({
       ok: true,
-      desktop: desktop ? { online: true, since: desktop.since, info: desktop.info || null } : { online: false },
+      desktop: desktop
+        ? { online: true, since: desktop.since, idleSec: Math.round((now - desktop.lastSeen) / 1000), info: desktop.info || null }
+        : { online: false },
       apps: apps.size,
-      time: Date.now(),
+      // 每条 App 链路多久没上行 + 发送积压：一眼分辨「在线」还是「幽灵连接」
+      appIdle: [...apps.entries()].map(([id, record]) => ({
+        id,
+        idleSec: Math.round((now - record.lastSeen) / 1000),
+        buffered: record.ws.bufferedAmount || 0,
+      })),
+      time: now,
     });
     res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
     res.end(body);
@@ -162,20 +202,21 @@ server.on("upgrade", (req, socket, head) => {
 let clientNo = 0;
 
 function attachDesktop(ws) {
-  if (desktop && desktop.ws !== ws) {
-    try { desktop.ws.close(4000, "replaced by newer desktop"); } catch { /* ignore */ }
-  }
-  desktop = { ws, since: Date.now(), info: null };
+  const record = { ws, since: Date.now(), info: null, lastSeen: Date.now() };
+  const previous = desktop;
+  desktop = record;
+  if (previous) retireDesktop(previous, "被新的桌面连接替换");
   log("desktop connected");
   sendToApps({ t: "evt", m: "desktop", d: { online: true } });
   broadcastApps([...apps.keys()]);
 
   ws.on("message", (data) => {
+    record.lastSeen = Date.now();
     let msg = null;
     try { msg = JSON.parse(String(data)); } catch { return; }
     if (!msg || typeof msg !== "object") return;
     if (msg.t === "hello") {
-      desktop.info = msg.d || null;
+      record.info = msg.d || null;
       log(`desktop hello: ${JSON.stringify(msg.d || {})}`);
       return;
     }
@@ -201,6 +242,7 @@ function attachDesktop(ws) {
       desktop = null;
       log("desktop disconnected");
       sendToApps({ t: "evt", m: "desktop", d: { online: false } });
+      failPending("桌面端已断开");
     }
   });
   ws.on("error", () => { /* close 统一收尾 */ });
@@ -209,18 +251,20 @@ function attachDesktop(ws) {
 function attachApp(ws) {
   clientNo += 1;
   const id = String(clientNo);
-  apps.set(id, { ws, since: Date.now(), info: null });
+  const record = { ws, since: Date.now(), info: null, lastSeen: Date.now() };
+  apps.set(id, record);
   log(`app #${id} connected（${apps.size} 在线）`);
   send(ws, { t: "evt", m: "desktop", d: { online: Boolean(desktop) } });
   broadcastApps([...apps.keys()]);
 
   ws.on("message", (data) => {
+    record.lastSeen = Date.now();
     let msg = null;
     try { msg = JSON.parse(String(data)); } catch { return; }
     if (!msg || typeof msg !== "object") return;
     if (msg.t === "hello") {
-      const record = apps.get(id);
-      if (record) record.info = msg.d || null;
+      const current = apps.get(id);
+      if (current) current.info = msg.d || null;
       send(ws, {
         t: "res",
         id: "relay-hello",
@@ -254,11 +298,26 @@ function attachApp(ws) {
   ws.on("error", () => { /* close 统一收尾 */ });
 }
 
-// 双向心跳：ws 库自动回 pong，但应用层也保活（云上常有闲置断开）
+// 双向心跳 + 死链回收：ws 库自动回 pong，但应用层也保活（云上常有闲置断开）；
+// 收到过上行帧就算活着，超过 IDLE_MS 没动静（或发送积压到上限）直接掐掉。
 setInterval(() => {
-  if (desktop) send(desktop.ws, { t: "ping", time: Date.now() });
-  for (const { ws } of apps.values()) send(ws, { t: "ping", time: Date.now() });
-}, 25000).unref();
+  const now = Date.now();
+  if (desktop) {
+    if (now - desktop.lastSeen > IDLE_MS) retireDesktop(desktop, `${Math.round((now - desktop.lastSeen) / 1000)}s 无上行`);
+    else send(desktop.ws, { t: "ping", time: now });
+  }
+  for (const [id, record] of apps) {
+    const idle = now - record.lastSeen > IDLE_MS;
+    const backedUp = (record.ws.bufferedAmount || 0) > MAX_BUFFER;
+    if (idle || backedUp) {
+      log(`app #${id} 死链回收（${idle ? `${Math.round((now - record.lastSeen) / 1000)}s 无上行` : "发送积压"}）`);
+      try { record.ws.close(4001, "inactive"); } catch { /* ignore */ }
+      try { record.ws.terminate(); } catch { /* ignore */ }
+      continue;
+    }
+    send(record.ws, { t: "ping", time: now });
+  }
+}, SWEEP_MS).unref();
 
 // 超时未回包的转发请求清掉，避免桌面端卡死时 pendingReq 无限增长
 setInterval(() => {

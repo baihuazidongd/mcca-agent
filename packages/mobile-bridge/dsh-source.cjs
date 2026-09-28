@@ -8,7 +8,7 @@
  *   WS   /api/events.mux  会话事件/投影/队列
  *   WS   /api/events.host 会话生命周期/运行状态
  *
- * 无鉴权，靠 Host 信任栅栏（本机回环即可）。默认 127.0.0.1:3081（portal 起的端口）。
+ * 本机托管实例使用门户捕获的登录 cookie。默认 127.0.0.1:3081。
  */
 
 const { createSessionState, applyEvent, reduceEntries } = require("./dsh-reducer.cjs");
@@ -55,7 +55,7 @@ class DshSource {
     void tick();
   }
 
-  stop() {
+  dispose() {
     this.started = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -79,13 +79,19 @@ class DshSource {
 
   // ── RPC ─────────────────────────────────────────────────────────
 
+  authHeaders() {
+    const url = new URL(this.baseUrl);
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return {};
+    return require("../runtime-core/dsh-auth.cjs").headers(Number(url.port || (url.protocol === "https:" ? 443 : 80)));
+  }
+
   async rpc(method, payload, timeoutMs = 15000) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}/api/${method}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...await this.authHeaders() },
         body: JSON.stringify({ type: "client-request", rpcId: `mcca-${++this.rpcSeq}-${Date.now()}`, method, payload: payload || {} }),
         signal: ctrl.signal,
       });
@@ -111,11 +117,13 @@ class DshSource {
     for (const path of ["/api/events.mux", "/api/events.host"]) this.openSocket(path);
   }
 
-  openSocket(path) {
+  async openSocket(path) {
     if (!this.started) return;
     let ws;
     try {
-      ws = new WebSocket(`${this.wsBase}${path}`);
+      const headers=await this.authHeaders();
+      if(!this.started)return;
+      ws = new WebSocket(`${this.wsBase}${path}`,{headers});
     } catch (error) {
       this.scheduleReconnect();
       return;
@@ -459,6 +467,7 @@ class DshSource {
   }
 
   async stop(id) {
+    if (id === undefined) { this.dispose(); return; }
     const value = await this.rpc("session.cancel", { sessionId: String(id) }, 20000);
     return { ok: value?.accepted !== false };
   }

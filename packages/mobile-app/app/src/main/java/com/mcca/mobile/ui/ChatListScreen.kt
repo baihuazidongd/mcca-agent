@@ -39,7 +39,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -249,7 +248,7 @@ private fun AgentOption(agent: String, desc: String, onClick: () -> Unit) {
 private fun SessionRow(session: Session, onOpen: (Session) -> Unit, onMenu: () -> Unit) {
     var tick by remember { mutableStateOf(0L) }
     if (session.running) {
-        LaunchedEffect(session.key, session.running) {
+        whilePolling(session.key, session.running) {
             while (session.running) {
                 tick = System.currentTimeMillis()
                 delay(1000)
