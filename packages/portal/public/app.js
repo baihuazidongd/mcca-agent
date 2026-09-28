@@ -386,7 +386,7 @@
         "div",
         { className: "eb-empty" },
         "还没有事件。在会话里明确要求后，pi / dsh 才会往这里推一条。推送会自动带上当时的工作区和会话。",
-        h("code", null, `node D:\\dshpi\\packages\\portal\\notify.cjs "标题" "正文"`),
+        h("code", null, `node packages/portal/notify.cjs "标题" "正文"`),
       );
     } else if (!shown.length) {
       body = h("div", { className: "eb-empty" }, "没有符合筛选的事件。换个工作区，或把搜索清掉。");

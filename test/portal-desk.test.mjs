@@ -27,7 +27,7 @@ test("a running grok session is listed even when pi is down", async () => {
     sides: SIDES,
     recentEveryMs: 1e15,
     getJson: fakeGet({
-      3461: { running: [{ id: "g1", title: "改事件板", cwd: "D:\\dshpi", running: true, updatedAt: 50 }] },
+      3461: { running: [{ id: "g1", title: "改事件板", cwd: "D:\\repo", running: true, updatedAt: 50 }] },
     }),
     terminals: [],
   });
@@ -55,8 +55,8 @@ test("an idle session stays out of the running list and a live terminal counts",
       3461: { running: [], all: [] },
     }),
     terminals: [
-      { id: "t1", agent: "hermes-web", title: "Hermes Agent", cwd: "D:\\dshpi", exited: null },
-      { id: "c1", agent: "codex-web", title: "Codex", cwd: "D:\\dshpi", exited: null },
+      { id: "t1", agent: "hermes-web", title: "Hermes Agent", cwd: "D:\\repo", exited: null },
+      { id: "c1", agent: "codex-web", title: "Codex", cwd: "D:\\repo", exited: null },
     ],
   });
   assert.deepEqual(snap.running.map((row) => row.id).sort(), ["c1", "p2", "t1"]);

@@ -11,7 +11,7 @@
  * 存储与全局性：
  *   - 配置落盘在 pi 全局 agent 目录（AGENT_DIR/dsh-web-settings.json，可用
  *     MCCA_AGENT_DIR 覆盖），与工作区无关——同一份预设对所有工作区/会话可用，
- *     不被任何固定目录（如 D:\dshpi）绑死。
+ *     不被任何固定目录（如某台机器上的工作区路径）绑死。
  *   - 兼容旧版：全局文件缺少 `preset-context` 段时回退读工作区
  *     dsh-web-settings.json 的同名字段（旧版扁平 rules 自动迁移成一个
  *     「默认预设」并设为默认启用）；写入只落全局文件，不回写旧文件。

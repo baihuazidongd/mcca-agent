@@ -1,6 +1,7 @@
 "use strict";
 
 const SERVICE_KINDS = new Set(require("../runtime-core/registry.cjs").registry().all().map(r => r.id));
+const { createPaths } = require("../runtime-core/paths.cjs");
 const HELPER_KINDS = new Set(["gpu", "network", "storage", "crashpad", "utility"]);
 const SERVICE_LABELS = {
   dsh: "dsh 服务",
@@ -92,13 +93,16 @@ function describeAppProcess({ name, hint, pid, portalPid }) {
   return { kind: "other", label: base || processName || "进程" };
 }
 
+// Detail rows are made root-relative so a clone directory name — and the account
+// name inside an absolute install path — never reach the process table.
+const APP_ROOT = createPaths().app.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+
 function displayHint(hint) {
   const text = String(hint || "");
   if (!text || text.startsWith("utility:") || /^(renderer|gpu-process|crashpad-handler|webview-host)$/.test(text)) return "";
   const norm = text.replaceAll("\\", "/");
-  const marker = "/dshpi/";
-  const at = norm.toLowerCase().lastIndexOf(marker);
-  const shown = at >= 0 ? norm.slice(at + 1) : norm.split("/").slice(-3).join("/");
+  const at = norm.toLowerCase().lastIndexOf(APP_ROOT + "/");
+  const shown = at >= 0 ? norm.slice(at + APP_ROOT.length + 1) : norm.split("/").slice(-3).join("/");
   return shown.length > 96 ? "…" + shown.slice(-95) : shown;
 }
 

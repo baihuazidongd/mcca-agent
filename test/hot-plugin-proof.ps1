@@ -1,10 +1,14 @@
 $ErrorActionPreference = 'SilentlyContinue'
 # Hot-plugin proof: add / edit / delete a host plugin and a client bundle with
 # NO process restart. Prints status codes only (never response bodies).
-$probeDir = "D:\dshpi\packages\hot-probe\src"
+$root = Split-Path -Parent $PSScriptRoot      # this script lives in <repo>/test
+$probePkg = Join-Path $root "packages\hot-probe"
+$probeDir = Join-Path $probePkg "src"
 $probeFile = "$probeDir\index.js"
-$manifest = "D:\dshpi\config\hot-plugins.json"
-$piClient = "D:\dshpi\packages\client-plugins\mcca-hot-test\client.js"
+$manifest = Join-Path $root "config\hot-plugins.json"
+$piClient = Join-Path $root "packages\client-plugins\mcca-hot-test\client.js"
+# The manifest row keeps forward slashes: hot-plugins.json is read by the host loader.
+$probeFileFwd = $probeFile -replace '\\', '/'
 
 function Route-Code($url) {
   try {
@@ -42,7 +46,7 @@ export function apply(ctx) {
 }
 '@
 Set-Content -Path $probeFile -Value $src -Encoding ASCII
-$entries = @((Get-Content $manifest -Raw | ConvertFrom-Json)) + [pscustomobject]@{ id = "mcca-hot-probe"; file = "D:/dshpi/packages/hot-probe/src/index.js" }
+$entries = @((Get-Content $manifest -Raw | ConvertFrom-Json)) + [pscustomobject]@{ id = "mcca-hot-probe"; file = $probeFileFwd }
 ConvertTo-Json $entries -Depth 5 | Set-Content -Path $manifest -Encoding ASCII
 Start-Sleep -Seconds 5
 $a = Route-Code "http://127.0.0.1:3081/mcca/hot-probe"
@@ -81,6 +85,6 @@ $h3 = (Invoke-WebRequest "http://127.0.0.1:3458/" -UseBasicParsing -TimeoutSec 8
 "PI DEL : removedFromBoot=$($h3 -notmatch 'mcca-hot-test')"
 
 # ---- cleanup --------------------------------------------------------------
-Remove-Item "D:\dshpi\packages\hot-probe" -Recurse -Force
+Remove-Item $probePkg -Recurse -Force
 $final = (Invoke-WebRequest "http://127.0.0.1:3081/mcca/hot-plugins" -UseBasicParsing -TimeoutSec 8).Content | ConvertFrom-Json
-"FINAL  : $(($final.plugins | ForEach-Object { "$($_.id)=$($_.mounted)" }) -join ' ')  probeDirRemoved=$(-not (Test-Path 'D:\dshpi\packages\hot-probe'))"
+"FINAL  : $(($final.plugins | ForEach-Object { "$($_.id)=$($_.mounted)" }) -join ' ')  probeDirRemoved=$(-not (Test-Path $probePkg))"

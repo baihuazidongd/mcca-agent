@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'SilentlyContinue'
-$dir = "D:\dshpi\plugins\tmp-hot-probe"
-$log = "D:\dshpi\test\hot-probe.log"
+$root = Split-Path -Parent $PSScriptRoot      # this script lives in <repo>/test
+$dir = Join-Path $root "plugins\tmp-hot-probe"
+$log = Join-Path $root "test\hot-probe.log"
+$logFwd = $log -replace '\\', '/'
 if (Test-Path $log) { Remove-Item $log -Force }
 
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -15,9 +17,9 @@ New-Item -ItemType Directory -Path $dir -Force | Out-Null
 }
 '@ | Set-Content "$dir\manifest.json" -Encoding UTF8
 
-@'
+(@'
 import fs from "node:fs";
-const LOG = "D:/dshpi/test/hot-probe.log";
+const LOG = "__LOG_PATH__";
 export default function probe(api) {
   fs.appendFileSync(LOG, `load pid=${process.pid}\n`);
   api.registerTool({
@@ -28,7 +30,7 @@ export default function probe(api) {
   });
   return () => { fs.appendFileSync(LOG, `dispose pid=${process.pid}\n`); };
 }
-'@ | Set-Content "$dir\index.mjs" -Encoding UTF8
+'@).Replace('__LOG_PATH__', $logFwd) | Set-Content "$dir\index.mjs" -Encoding UTF8
 
 function Lines { if (Test-Path $log) { (Get-Content $log) } else { @() } }
 

@@ -100,6 +100,8 @@ packages/pi-web/test/apply-fix.cjs
 packages/pi-web/test/apply-octopath.cjs
 packages/pi-web/test/fixer*.cjs
 packages/pi-web/test/inspect1.cjs
+# Dumps this machine's ~/.pi/agent/models.json into config/. Scratch.
+packages/pi-web/test/dump-models.cjs
 # UI captures written by screenshot-layout.cjs — scratch, not fixtures.
 packages/pi-web/test/*.png
 # Point at a private local art workspace and its asset tree.

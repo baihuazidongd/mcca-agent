@@ -2,6 +2,9 @@
 // 第一次 chat 调用返回 write 工具调用（让 pi 真实执行建文件），之后返回文本。
 // 运行：node test/mock-llm-endpoint.cjs [port]   （默认 3501）
 const http = require("node:http");
+const path = require("node:path");
+// 工具调用里回给 pi 的落点：跟着检出目录走，换机器/换目录都不用改脚本。
+const ROOT = path.resolve(__dirname, "..").replaceAll("\\", "/");
 const port = Number(process.argv[2]) || 3501;
 const models = [
   { id: "mock-mini", name: "Mock Mini", context_length: 65536, max_tokens: 8192 },
@@ -22,7 +25,7 @@ http.createServer((req, res) => {
     if (chatPhase === 0) {
       chatPhase = 1;
       const args = JSON.stringify({
-        path: "D:/dshpi/config/.pi-web/diff-test.txt",
+        path: `${ROOT}/config/.pi-web/diff-test.txt`,
         content: "hello diff\nsecond line\n",
       });
       chunks = [

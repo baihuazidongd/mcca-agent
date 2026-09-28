@@ -4,7 +4,8 @@ trap {
     Write-Host $_.ScriptStackTrace
     exit 1
 }
-$repoRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { 'D:\dshpi' }
+if (-not $PSScriptRoot) { throw 'Run this script from a file on disk ($PSScriptRoot is empty).' }
+$repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'packages/portal/server.cjs'))) {
     throw "Portal source not found under $repoRoot"
 }

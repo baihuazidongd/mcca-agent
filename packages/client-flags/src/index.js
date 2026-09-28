@@ -14,6 +14,8 @@
  */
 
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Cordis function plugin name. */
 export const name = "mcca-client-flags";
@@ -22,7 +24,12 @@ export const name = "mcca-client-flags";
 export const inject = ["webServer"];
 
 /** 共享开关表（与 portal 的客户端插件开关同一份文件）。 */
-const CONFIG = "D:/dshpi/config/client-plugins.json";
+// 读点必须与 portal 的写点（server.cjs 的 paths.data）同一约定，否则便携分发下
+// 数据目录一搬，这里就会静默读到不存在的路径并按 fail open 放行全部插件。
+const APP = path.resolve(
+  process.env.MCCA_HOME || path.join(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+);
+const CONFIG = path.join(process.env.MCCA_DATA_DIR || path.join(APP, "config"), "client-plugins.json");
 
 /** 读禁用集；文件缺失或坏 JSON 一律按“全启用”处理（fail open）。 */
 function disabledIds() {

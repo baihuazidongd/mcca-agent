@@ -4,19 +4,21 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { commandHint, describeAppProcess, buildProcessRow } = require("../packages/portal/process-detail.cjs");
+const { createPaths } = require("../packages/runtime-core/paths.cjs");
 
 const PORTAL = 19556;
+const APP = createPaths().app.replaceAll("\\", "/");
 
 test("command hints identify app processes without keeping the raw command line", () => {
   assert.equal(commandHint('"C:\\Program Files\\nodejs\\node.exe" packages\\pi-web\\server.cjs'), "packages\\pi-web\\server.cjs");
-  assert.equal(commandHint("node D:/dshpi/mcp/zhipin/server.mjs"), "D:/dshpi/mcp/zhipin/server.mjs");
-  assert.equal(commandHint("node D:/dshpi/mcp/everything/server.mjs"), "D:/dshpi/mcp/everything/server.mjs");
+  assert.equal(commandHint("node D:/repo/mcp/zhipin/server.mjs"), "D:/repo/mcp/zhipin/server.mjs");
+  assert.equal(commandHint("node D:/repo/mcp/everything/server.mjs"), "D:/repo/mcp/everything/server.mjs");
   assert.equal(
-    commandHint("node D:/dshpi/node_modules/@playwright/mcp/cli.js"),
+    commandHint("node D:/repo/node_modules/@playwright/mcp/cli.js"),
     "playwright/mcp/cli.js",
   );
   assert.match(
-    commandHint('python.exe "D:\\dshpi\\config\\dsh-home\\mcp\\mcp-ldplayer\\mcp_ldplayer\\mcp_server.py" --ldplayer-path D:/leidian'),
+    commandHint('python.exe "D:\\repo\\config\\dsh-home\\mcp\\mcp-ldplayer\\mcp_ldplayer\\mcp_server.py" --ldplayer-path D:/emulator'),
     /mcp_server\.py$/,
   );
   assert.match(commandHint('"D:\\ComfyUI\\venv\\Scripts\\python.exe" "D:\\ComfyUI\\venv\\Scripts\\comfy-mcp.exe"'), /comfy-mcp\.exe$/);
@@ -47,9 +49,9 @@ test("labels say what the process is for", () => {
     ["vendor/dsh/apps/cli/src/bin.ts", "node", "dsh", "dsh 服务"],
     ["playwright/mcp/cli.js", "node", "playwright", "Playwright 浏览器工具"],
     ["mcca-browser", "msedge", "browser", "轻量浏览器"],
-    ["D:/dshpi/mcp/zhipin/server.mjs", "node", "zhipin", "招聘工具"],
-    ["D:/dshpi/mcp/everything/server.mjs", "node", "everything", "Everything 文件搜索"],
-    ["D:/dshpi/config/dsh-home/mcp/mcp-ldplayer/mcp_ldplayer/mcp_server.py", "python", "ldplayer", "雷电模拟器工具"],
+    ["D:/repo/mcp/zhipin/server.mjs", "node", "zhipin", "招聘工具"],
+    ["D:/repo/mcp/everything/server.mjs", "node", "everything", "Everything 文件搜索"],
+    ["D:/repo/config/dsh-home/mcp/mcp-ldplayer/mcp_ldplayer/mcp_server.py", "python", "ldplayer", "雷电模拟器工具"],
     ["D:/ComfyUI/venv/Scripts/comfy-mcp.exe", "comfy-mcp", "comfy", "ComfyUI 工具"],
     ["D:/ComfyUI/main.py", "python", "canvas", "画布服务"],
     ["renderer", "msedgewebview2", "renderer", "聊天页面渲染"],
@@ -100,12 +102,17 @@ test("stop and restart stay inside the owning service", () => {
   assert.equal(pi.canRestart, true);
 
   const tool = buildProcessRow({
-    pid: 21, name: "node", hint: "D:/dshpi/mcp/zhipin/server.mjs", started: "100", portalPid: PORTAL, service: "pi-web", rootPid: 20,
+    pid: 21, name: "node", hint: `${APP}/mcp/zhipin/server.mjs`, started: "100", portalPid: PORTAL, service: "pi-web", rootPid: 20,
   });
   assert.equal(tool.label, "招聘工具");
-  assert.equal(tool.detail, "dshpi/mcp/zhipin/server.mjs");
+  assert.equal(tool.detail, "mcp/zhipin/server.mjs");
   assert.equal(tool.canStop, true);
   assert.equal(tool.canRestart, false);
+
+  const outside = buildProcessRow({
+    pid: 22, name: "node", hint: "D:/tools/other/server.mjs", started: "100", portalPid: PORTAL, service: "pi-web", rootPid: 20,
+  });
+  assert.equal(outside.detail, "tools/other/server.mjs");
 
   const codex = buildProcessRow({
     pid: 30, name: "codex", hint: "C:/Users/me/AppData/Local/OpenAI/Codex/bin/codex.exe", started: "100", portalPid: PORTAL, service: "codex-web", rootPid: 30,

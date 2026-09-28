@@ -309,7 +309,7 @@ fun fmtBytes(bytes: Long): String {
     return String.format(Locale.CHINA, "%.2f GB", mb / 1024.0)
 }
 
-/** 会话列表用的工作区短名（D:\dshpi → dshpi）。 */
+/** 会话列表用的工作区短名（C:\work\demo → demo）。 */
 fun shortWorkspace(cwd: String): String {
     val trimmed = cwd.trim().trimEnd('\\', '/')
     if (trimmed.isEmpty()) return ""

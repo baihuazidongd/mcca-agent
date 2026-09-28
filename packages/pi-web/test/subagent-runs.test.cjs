@@ -208,7 +208,7 @@ test("path-style status.json sessionId still completes the run", () => {
   const sessionId = "01a07ad9-21de-7006-84b6-5b6742496634";
   fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
     runId: "async-1",
-    sessionId: "D:\\dshpi\\sessions\\2026-09-07T07-50-45-470Z_" + sessionId + ".jsonl",
+    sessionId: "D:\\repo\\sessions\\2026-09-07T07-50-45-470Z_" + sessionId + ".jsonl",
     state: "complete",
     steps: [{
       agent: "worker",
@@ -409,7 +409,7 @@ test("a failed run carries the failure class the UI can name", () => {
   assert.equal(more.r7.failClass, "acceptance_rejected");
   assert.equal(more.r8.failClass, "provider_error");
   // 产物路径里的十六进制串不能被当成鉴权失败
-  const noise = classifyFailure("Output artifact: D:\\dshpi\\config\\.pi-web\\sessions\\subagent-artifacts\\a401b7de_worker_0_output.md");
+  const noise = classifyFailure("Output artifact: D:\\repo\\config\\.pi-web\\sessions\\subagent-artifacts\\a401b7de_worker_0_output.md");
   assert.equal(noise, null);
   registry.put({ runId: "r1", index: 0, agent: "worker", status: "completed", result: "ok" });
   assert.equal(registry.snapshot().runs.find((r) => r.runId === "r1").failClass, undefined);
